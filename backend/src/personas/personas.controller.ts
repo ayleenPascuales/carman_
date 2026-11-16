@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Put, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
 import { PersonasService } from './personas.service';
 import { RegistroInicialDto } from './dto/registroInicial.dto';
 import { AgregarRolDto } from './dto/agregarRol.dto';
 import { CrearLicenciaDto } from './dto/crearLicencia.dto';
+import { AuthGuard } from '../auth/auth.guard';
+
 
 @Controller('personas')
 export class PersonasController {
@@ -15,23 +17,27 @@ export class PersonasController {
         return this.personasService.registroInicial(dto);
     }
 
-    @Post(':idPersona/roles')
-    agregarRol(@Param('idPersona', ParseIntPipe) idPersona: number, @Body() dto: AgregarRolDto,) {
-        return this.personasService.agregarRol(idPersona, dto);
+    @UseGuards(AuthGuard)
+    @Post('roles')
+    agregarRol(@Req() request: any, @Body() dto: AgregarRolDto,) {
+        return this.personasService.agregarRol(request.user.idPersona, dto);
     }
 
-    @Post(':idPersona/licencia')
-    crearLicencia(@Param('idPersona', ParseIntPipe) idPersona: number, @Body() dto: CrearLicenciaDto,) {
-        return this.personasService.crearLicencia(idPersona, dto);
+    @UseGuards(AuthGuard)
+    @Post('licencia')
+    crearLicencia(@Req() request: any, @Body() dto: CrearLicenciaDto,) {
+        return this.personasService.crearLicencia(request.user.idPersona, dto);
     }
 
-    @Put(':idPersona/licencia')
-    actualizarLicencia(@Param('idPersona', ParseIntPipe) idPersona: number, @Body() dto: CrearLicenciaDto,) {
-        return this.personasService.actualizarLicencia(idPersona, dto);
+    @UseGuards(AuthGuard)
+    @Put('licencia')
+    actualizarLicencia(@Req() request: any, @Body() dto: CrearLicenciaDto,) {
+        return this.personasService.actualizarLicencia(request.user.idPersona, dto);
     }
 
-    @Get(':idPersona')
-    obtenerPerfil(@Param('idPersona', ParseIntPipe) idPersona: number,) {
-        return this.personasService.obtenerPerfil(idPersona);
+    @UseGuards(AuthGuard)
+    @Get('perfil')
+    obtenerPerfil(@Req() request: any) {
+        return this.personasService.obtenerPerfil(request.user.idPersona);
     }
 }

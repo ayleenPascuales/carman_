@@ -4,12 +4,14 @@ import * as bcrypt from 'bcrypt';
 import { RegistroInicialDto, Rol } from './dto/registroInicial.dto';
 import { AgregarRolDto, RolAdicional } from './dto/agregarRol.dto';
 import { CrearLicenciaDto } from './dto/crearLicencia.dto';
+import { AuthService } from '../auth/auth.service';
 
 @Injectable()
 export class PersonasService {
     constructor(
         @Inject('DATABASE_CONNECTION')
         private readonly database: Pool,
+        private readonly authService: AuthService,
     ) { }
 
     async registroInicial(dto: RegistroInicialDto) {
@@ -22,7 +24,7 @@ export class PersonasService {
                 'Para registrarte como conductor debes proporcionar tu licencia.'
             );
         }
-        if (esConductor && dto.licencia) {
+        if (dto.licencia) {
             const fechaExpiracion = new Date(
                 `${dto.licencia.fechaExpiracion}T00:00:00`
             );
@@ -62,14 +64,25 @@ export class PersonasService {
             );
         }
 
-        const contrasenaHash = await bcrypt.hash(
-            dto.persona.contrasena, 10,
-        );
-
         const connection = await this.database.getConnection();
 
+        let uidFirebase: string | undefined;
+        let transaccionIniciada = false;
+        let registroConfirmado = false;
+
         try {
+            uidFirebase = await this.authService.crearCuenta(
+                dto.persona.email,
+                dto.persona.contrasena
+            );
+
+            const contrasenaHash = await bcrypt.hash(
+                dto.persona.contrasena,
+                10
+            );
+
             await connection.beginTransaction();
+            transaccionIniciada = true;
 
             const [resultadoPersona] = await connection.execute<ResultSetHeader>(
                 `INSERT INTO persona (
@@ -79,12 +92,13 @@ export class PersonasService {
                 email,
                 usuario,
                 contrasenaHash,
+                uidFirebase,
                 telefono,
                 fechaNacimiento,
                 ciudad,
                 direccion,
                 fotoPerfil
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     dto.persona.documento,
                     dto.persona.nombre,
@@ -92,6 +106,7 @@ export class PersonasService {
                     dto.persona.email,
                     dto.persona.usuario,
                     contrasenaHash,
+                    uidFirebase,
                     dto.persona.telefono,
                     dto.persona.fechaNacimiento,
                     dto.persona.ciudad,
@@ -185,20 +200,41 @@ export class PersonasService {
             }
 
             await connection.commit();
+            registroConfirmado = true;
+
             return {
                 mensaje: 'Registro realizado correctamente. ',
                 idPersona, rol: dto.roles,
             };
 
         } catch (error) {
-            await connection.rollback();
-            if (error && typeof error === 'object' && 'code' in error &&
-                error.code === 'ER_DUP_ENTRY') {
+            if (transaccionIniciada && !registroConfirmado) {
+                try {
+                    await connection.rollback();
+                } catch {
+                    //!se conserva el error
+                }
+            }
+
+            if (uidFirebase && !registroConfirmado) {
+                try {
+                    await this.authService.eliminarCuenta(uidFirebase);
+                } catch {
+                    //!se conserva el error
+                }
+            }
+            const codigoError = error && typeof error === 'object'
+                && 'code' in error
+                ? error.code : undefined;
+
+            if (codigoError === 'ER_DUP_ENTRY' ||
+                codigoError === 'auth/email-already-exists') {
                 throw new ConflictException(
-                    'El documento, usuario, licencia o placa ya se encuentran registrados. ',
+                    'El correo, documento, usuario, licencia o placa ya se encuentran registrados.'
                 );
             }
             throw error;
+
         } finally {
             connection.release();
         }

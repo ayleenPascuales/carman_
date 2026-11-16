@@ -10,6 +10,7 @@ import { ReservasModule } from './reservas/reservas.module';
 import { PagosModule } from './pagos/pagos.module';
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { CalificacionesModule } from './calificaciones/calificaciones.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CalificacionesModule } from './calificaciones/calificaciones.module';
     PagosModule,
     NotificacionesModule,
     CalificacionesModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
