@@ -11,6 +11,7 @@ import { PagosModule } from './pagos/pagos.module';
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AuthModule } from './auth/auth.module';
     NotificacionesModule,
     CalificacionesModule,
     AuthModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

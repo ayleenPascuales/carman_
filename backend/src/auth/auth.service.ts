@@ -1,4 +1,4 @@
-import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { cert, getApp, getApps, initializeApp } from 'firebase-admin';
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
@@ -113,6 +113,17 @@ export class AuthService {
             );
         }
         return persona.idPersona;
+    }
+
+    async verificarAdministrador(idPersona: number): Promise<void> {
+        const [administradores] = await this.database.query<RowDataPacket[]>(
+            `SELECT idAdministrador FROM administrador 
+            WHERE idPersona = ? AND estado = 'Activo' LIMIT 1`, [idPersona]
+        );
+
+        if (administradores.length === 0) {
+            throw new ForbiddenException('No tienes permisos para acceder a esta sección. ');
+        }
     }
 
 }
