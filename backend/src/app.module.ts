@@ -12,12 +12,14 @@ import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     PersonasModule,
     VehiculosModule,

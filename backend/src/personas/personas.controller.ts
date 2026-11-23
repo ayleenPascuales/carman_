@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Patch, Param, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
 import { PersonasService } from './personas.service';
 import { RegistroInicialDto } from './dto/registroInicial.dto';
 import { AgregarRolDto } from './dto/agregarRol.dto';
 import { CrearLicenciaDto } from './dto/crearLicencia.dto';
 import { AuthGuard } from '../auth/auth.guard';
+import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
+import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
 
 
 @Controller('personas')
@@ -39,5 +41,19 @@ export class PersonasController {
     @Get('perfil')
     obtenerPerfil(@Req() request: any) {
         return this.personasService.obtenerPerfil(request.user.idPersona);
+    }
+
+    @UseGuards(AuthGuard)
+    @Patch('perfil')
+    actualizarPersona(@Req() request: any, @Body() dto: ActualizarPersonaDto) {
+        return this.personasService.actualizarPersona(request.user.idPersona, dto);
+    }
+
+    @UseGuards(AuthGuard)
+    @Patch('conductor/disponibilidad')
+    actualizarDisponibilidad(@Req() request: any, @Body() dto: ActualizarConductorDto) {
+        return this.personasService.actualizarDisponibilidadConductor(
+            request.user.idPersona, dto
+        );
     }
 }

@@ -5,6 +5,7 @@ import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class AuthService {
@@ -28,7 +29,6 @@ export class AuthService {
                 credential: cert(credenciales),
             });
         this.firebaseAuth = getAuth(firebaseApp);
-
     }
 
     async verificarToken(token: string): Promise<DecodedIdToken> {
@@ -55,17 +55,25 @@ export class AuthService {
     async iniciarSesion(identificador: string, contrasena: string) {
         let email = identificador;
 
-        if (!identificador.includes('@')) {
-            const [personas] = await this.database.query<RowDataPacket[]>(
-                'SELECT email FROM persona WHERE usuario = ? LIMIT 1', [identificador],
-            );
+        const [personas] = await this.database.query<RowDataPacket[]>(
+            `SELECT email, estado FROM persona
+            WHERE ${identificador.includes('@') ? 'email' : 'usuario'} = ?
+            LIMIT 1`, [identificador]
+        );
 
-            const persona = personas[0] as { email: string } | undefined;
-            if (!persona) {
-                throw new UnauthorizedException('Credenciales incorrectas. ',);
-            }
-            email = persona.email
+        const persona = personas[0] as {
+            email: string; estado: string;
+        } | undefined;
+
+        if (!persona) {
+            throw new UnauthorizedException('Credenciales incorrectas. ')
         }
+        if (persona.estado === 'Suspendido') {
+            throw new ForbiddenException(
+                'Tu cuenta ha sido suspendida. Contacta con administracion. '
+            );
+        }
+        email = persona.email;
 
         const apiKey = this.configService.getOrThrow<string>(
             'FIREBASE_API_KEY',
@@ -125,5 +133,57 @@ export class AuthService {
             throw new ForbiddenException('No tienes permisos para acceder a esta sección. ');
         }
     }
+
+    async verificarEstadoCuenta(idPersona: number): Promise<void> {
+        const [personas] = await this.database.query<RowDataPacket[]>(
+            `SELECT estado,
+            ultimaActividad,
+            (COALESCE(ultimaActividad, fechaHoraRegistro)
+            <= DATE_SUB(NOW(), INTERVAL 180 DAY))
+            AS superoInactividad FROM persona
+            WHERE idpersona = ? LIMIT 1`, [idPersona]
+        );
+
+        const persona = personas[0] as {
+            estado: string;
+            ultimaActividad: Date | null;
+            superoInactividad: number;
+        } | undefined;
+
+        if (!persona) {
+            throw new UnauthorizedException(
+                'No existe una persona asociada a etsa cuenta.'
+            );
+        }
+        if (persona.estado === 'Suspendido')
+            throw new ForbiddenException(
+                'Tu cuenta ha sido suspendida. Contacta con administracion. '
+            );
+        if (persona.estado === 'Activo' && Number(persona.superoInactividad) === 1) {
+            await this.database.execute(
+                `UPDATE persona SET estado = 'Inactivo' WHERE idPersona = ?`, [idPersona]
+            );
+        }
+    }
+
+    @Cron(CronExpression.EVERY_DAY_AT_2AM, {
+        timeZone: 'America/Bogota',
+    })
+    async actualizarCuentasInactivas(): Promise<void> {
+        await this.database.execute(
+            `UPDATE persona SET estado = 'Inactivo' WHERE estado = 'Activo'
+            AND COALESCE(ultimaActividad, fechaHoraRegistro)
+            <= DATE_SUB(NOW(), INTERVAL 180 DAY)`
+        );
+    }
+
+    async registrarActividad(idPersona: number): Promise<void> {
+        await this.database.execute(
+            `UPDATE persona SET estado = 'Activo', ultimaActividad = NOW()
+            WHERE idPersona = ? AND estado IN ('Activo', 'Inactivo')`, [idPersona]
+        );
+    }
+
+
 
 }

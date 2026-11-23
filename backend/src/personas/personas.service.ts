@@ -5,6 +5,8 @@ import { RegistroInicialDto, Rol } from './dto/registroInicial.dto';
 import { AgregarRolDto, RolAdicional } from './dto/agregarRol.dto';
 import { CrearLicenciaDto } from './dto/crearLicencia.dto';
 import { AuthService } from '../auth/auth.service';
+import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
+import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
 
 @Injectable()
 export class PersonasService {
@@ -632,5 +634,88 @@ export class PersonasService {
                 propietario: Boolean(roles[0].propietario),
             },
         };
+    }
+
+    async actualizarPersona(idPersona: number, dto: ActualizarPersonaDto) {
+        const connection = await this.database.getConnection();
+
+        try {
+            const campos = [
+                'nombre',
+                'apellido',
+                'telefono',
+                'fechaNacimiento',
+                'ciudad',
+                'direccion',
+                'fotoPerfil'
+            ] as const;
+
+            const actualizaciones: string[] = [];
+            const valores: (string)[] = [];
+            for (const campo of campos) {
+                const valor = dto[campo];
+                if (valor !== undefined) {
+                    actualizaciones.push(`${campo} = ?`);
+                    valores.push(valor);
+                }
+            }
+            if (actualizaciones.length === 0) {
+                throw new BadRequestException(
+                    'Debes proporcionar al menos un dato para poder actualizar.'
+                );
+            }
+            if (dto.fechaNacimiento) {
+                const nacimiento = new Date(`${dto.fechaNacimiento}T00:00:00`);
+                const hoy = new Date();
+                let edad = hoy.getFullYear() - nacimiento.getFullYear();
+                if (hoy.getMonth() < nacimiento.getMonth() ||
+                    (hoy.getMonth() === nacimiento.getMonth() &&
+                        hoy.getDate() < nacimiento.getDate())) {
+                    edad--;
+                }
+                if (edad < 18 || nacimiento > hoy) {
+                    throw new BadRequestException('Debes tener almenos 18 años. ');
+                }
+            }
+            const [personas] = await connection.execute<RowDataPacket[]>(
+                `SELECT idPersona FROM persona WHERE idPersona = ?`, [idPersona]
+            );
+            if (personas.length === 0) {
+                throw new NotFoundException('Usuario no encontrado. ')
+            }
+            await connection.execute(
+                `UPDATE persona SET ${actualizaciones.join(', ')} 
+                WHERE idPersona = ?`, [...valores, idPersona]
+            );
+            return {
+                mensaje: 'Datos personales actualizados correctamente.',
+                idPersona
+            };
+        } finally {
+            connection.release();
+        }
+    }
+
+    async actualizarDisponibilidadConductor(idPersona: number, dto: ActualizarConductorDto) {
+        const connection = await this.database.getConnection();
+
+        try {
+            const [conductores] = await connection.execute<RowDataPacket[]>(
+                `SELECT idPersona FROM conductor WHERE idPersona = ?`, [idPersona]
+            );
+            if (conductores.length === 0) {
+                throw new NotFoundException('Esta persona no tiene registrado el rol de conductor. ');
+            }
+            await connection.execute(
+                `UPDATE conductor SET disponibilidad = ? WHERE idPersona = ?`, [dto.disponibilidad, idPersona]
+            );
+            return {
+                mensaje: 'Disponibilidad actualizada correctamente. ',
+                idPersona,
+                disponibilidad: dto.disponibilidad
+            };
+        } finally {
+            connection.release();
+        }
     }
 }

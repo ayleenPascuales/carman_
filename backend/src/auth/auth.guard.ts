@@ -20,6 +20,7 @@ export class AuthGuard implements CanActivate {
     const token = autorizacion.split(' ')[1];
     const usuario = await this.authService.verificarToken(token);
     const idPersona = await this.authService.obtenerIdPersona(usuario.uid,);
+    await this.authService.verificarEstadoCuenta(idPersona);
     request.user = { ...usuario, idPersona, };
     return true;
   }
