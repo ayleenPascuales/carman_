@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/constants/app_assets.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/user_profile.dart';
@@ -91,13 +92,17 @@ class LicenseController extends Notifier<LicenseState> {
     return LicenseState(
       status: status,
       frontAsset:
-          status == LicenseStatus.rejected || status == LicenseStatus.approved
+          !AppConfig.useLiveApi &&
+              (status == LicenseStatus.rejected ||
+                  status == LicenseStatus.approved)
           ? AppAssets.licenseSample
           : null,
-      rejectionReason: status == LicenseStatus.rejected
+      rejectionReason: !AppConfig.useLiveApi && status == LicenseStatus.rejected
           ? 'El documento presentado estaba borroso o caducado. Sube una foto nítida de tu permiso vigente.'
           : null,
-      approvedAt: status == LicenseStatus.approved ? DateTime.now() : null,
+      approvedAt: !AppConfig.useLiveApi && status == LicenseStatus.approved
+          ? DateTime.now()
+          : null,
     );
   }
 
@@ -110,6 +115,7 @@ class LicenseController extends Notifier<LicenseState> {
   }
 
   void useDemoFront() {
+    if (AppConfig.useLiveApi) return;
     state = state.copyWith(
       frontAsset: AppAssets.licenseSample,
       status: state.status == LicenseStatus.rejected
@@ -126,6 +132,12 @@ class LicenseController extends Notifier<LicenseState> {
   }) async {
     final user = ref.read(authControllerProvider).user;
     if (user == null) return false;
+    if (AppConfig.useLiveApi) {
+      state = state.copyWith(
+        error: 'La subida segura y revisión de licencias todavía no está disponible en el modo API.',
+      );
+      return false;
+    }
     if (!state.hasFront) {
       state = state.copyWith(
         error: 'Carga la foto frontal de tu licencia para continuar.',
@@ -203,6 +215,7 @@ class LicenseController extends Notifier<LicenseState> {
 
   /// Used by the in-app demo toolbox to showcase the rejected upload state.
   Future<void> simulateRejection() async {
+    if (AppConfig.useLiveApi) return;
     final user = ref.read(authControllerProvider).user;
     if (user == null) return;
     final rejected = user.copyWith(licenseStatus: LicenseStatus.rejected);
@@ -216,6 +229,7 @@ class LicenseController extends Notifier<LicenseState> {
 
   /// Allows an already verified user to upload a renewed licence.
   Future<void> startRenewal() async {
+    if (AppConfig.useLiveApi) return;
     final user = ref.read(authControllerProvider).user;
     if (user == null) return;
     _demoReviewTimer?.cancel();

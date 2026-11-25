@@ -247,7 +247,13 @@ class CheckoutScreen extends ConsumerWidget {
         pickupPointsProvider(draft.pickupPoint.city).future,
       );
     } catch (_) {
-      points = const [];
+      if (context.mounted) {
+        showCarmanSnack(
+          context,
+          'No se pudieron cargar los puntos autorizados.',
+        );
+      }
+      return;
     }
     if (!context.mounted) return;
     if (points.isEmpty) {

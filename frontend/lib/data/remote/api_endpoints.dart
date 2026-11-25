@@ -19,6 +19,7 @@ abstract final class ApiEndpoints {
   static const vehicles = '/vehiculos';
   static const vehicleCatalog = '/vehiculos/catalogo';
   static const myVehicles = '/vehiculos/mis-vehiculos';
+  static const pickupPoints = '/puntos-autorizados';
   static const favorites = '/vehiculos/favoritos';
 
   static String vehicle(Object id) => '/vehiculos/$id';

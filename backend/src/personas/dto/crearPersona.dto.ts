@@ -1,4 +1,4 @@
-import { IsEmail, IsDateString, IsNotEmpty, IsString, MaxLength, MinLength, IsUrl, Matches, } from "class-validator";
+import { IsEmail, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength, IsUrl, Matches, } from "class-validator";
 
 export class CrearPersonaDto {
 
@@ -47,14 +47,14 @@ export class CrearPersonaDto {
     @MaxLength(50)
     ciudad: string;
 
+    @IsOptional()
     @IsString()
-    @IsNotEmpty()
     @MaxLength(200)
-    direccion: string;
+    direccion?: string;
 
+    @IsOptional()
     @IsUrl()
-    @IsNotEmpty()
     @MaxLength(500)
-    fotoPerfil: string;
+    fotoPerfil?: string;
 
 }

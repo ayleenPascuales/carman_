@@ -208,7 +208,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       points = await ref.read(pickupPointsProvider(_draft.city).future);
     } catch (_) {
-      points = const [];
+      if (mounted) {
+        showCarmanSnack(
+          context,
+          'No se pudieron cargar los puntos autorizados.',
+        );
+      }
+      return;
     }
     if (!mounted) return;
     if (points.isEmpty) {
@@ -263,14 +269,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                 Text(point.name, style: AppTheme.titleMd),
                                 const SizedBox(height: 2),
                                 Text(point.address, style: AppTheme.bodySm),
-                                const SizedBox(height: 3),
-                                Text(
-                                  'A ${point.distanceLabel} · ${point.isFree ? 'Entrega gratis' : 'Con cargo'}',
-                                  style: AppTheme.labelSm.copyWith(
-                                    fontSize: 9.5,
-                                    color: AppColors.primary,
+                                if (point.hasDeliveryDetails) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'A ${point.distanceLabel} · ${point.isFree ? 'Entrega gratis' : 'Con cargo'}',
+                                    style: AppTheme.labelSm.copyWith(
+                                      fontSize: 9.5,
+                                      color: AppColors.primary,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ],
                             ),
                           ),
@@ -478,225 +486,225 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               ? (constraints.maxWidth - 720) / 2
               : 0.0;
           return ListView(
-        padding: EdgeInsets.fromLTRB(20 + side, 10, 20 + side, 24),
-        children: [
-          const _Label('Recogida'),
-          const SizedBox(height: 8),
-          Material(
-            color: AppColors.surfaceSoft,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              onTap: _pickCity,
-              borderRadius: BorderRadius.circular(14),
-              child: Padding(
-                padding: const EdgeInsets.all(13),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.place_outlined,
-                      size: 18,
-                      color: AppColors.primary,
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${_draft.city} · ${_draft.pickupPointName.split('·').last.trim()}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.titleMd.copyWith(fontSize: 13),
+            padding: EdgeInsets.fromLTRB(20 + side, 10, 20 + side, 24),
+            children: [
+              const _Label('Recogida'),
+              const SizedBox(height: 8),
+              Material(
+                color: AppColors.surfaceSoft,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  onTap: _pickCity,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.all(13),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.place_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_draft.city} · ${_draft.pickupPointName.split('·').last.trim()}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTheme.titleMd.copyWith(fontSize: 13),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                _draft.pickupPointName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTheme.bodySm.copyWith(fontSize: 10),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 1),
-                          Text(
-                            _draft.pickupPointName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.bodySm.copyWith(fontSize: 10),
+                        ),
+                        IconButton(
+                          onPressed: _pickPickupPoint,
+                          icon: const Icon(Icons.near_me_outlined, size: 17),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: 'Cambiar punto',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              CarmanTextField(
+                controller: _searchController,
+                hint: 'Marca o modelo',
+                prefixIcon: Icons.search_rounded,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 20),
+              const _Label('Modalidad'),
+              const SizedBox(height: 8),
+              SegmentedControl<RentalMode>(
+                values: RentalMode.values,
+                selected: mode,
+                labelBuilder: (value) => value.label,
+                onChanged: _setMode,
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSoft,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: mode == RentalMode.hourly
+                    ? Row(
+                        children: [
+                          Expanded(
+                            child: _SelectionTile(
+                              icon: Icons.calendar_today_rounded,
+                              label: 'Fecha',
+                              value: AppFormatters.shortDate(_startAt),
+                              onTap: _pickStartDate,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: _SelectionTile(
+                              icon: Icons.schedule_rounded,
+                              label: 'Inicio',
+                              value: AppFormatters.time(_startAt),
+                              onTap: _pickStartDate,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: _SelectionTile(
+                              icon: Icons.timelapse_rounded,
+                              label: 'Duración',
+                              value: '$_hourlyDuration h',
+                              onTap: _pickDuration,
+                              highlighted: true,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(
+                            child: _SelectionTile(
+                              icon: Icons.event_available_rounded,
+                              label: 'Desde',
+                              value:
+                                  '${AppFormatters.shortDate(_startAt)} · ${AppFormatters.time(_startAt)}',
+                              onTap: _pickStartDate,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: _SelectionTile(
+                              icon: Icons.event_busy_rounded,
+                              label: 'Hasta',
+                              value:
+                                  '${AppFormatters.shortDate(_endAt)} · ${AppFormatters.time(_endAt)}',
+                              onTap: _pickEndDate,
+                              highlighted: true,
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      onPressed: _pickPickupPoint,
-                      icon: const Icon(Icons.near_me_outlined, size: 17),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: 'Cambiar punto',
-                    ),
-                  ],
-                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          CarmanTextField(
-            controller: _searchController,
-            hint: 'Marca o modelo',
-            prefixIcon: Icons.search_rounded,
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 20),
-          const _Label('Modalidad'),
-          const SizedBox(height: 8),
-          SegmentedControl<RentalMode>(
-            values: RentalMode.values,
-            selected: mode,
-            labelBuilder: (value) => value.label,
-            onChanged: _setMode,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSoft,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: mode == RentalMode.hourly
-                ? Row(
-                    children: [
-                      Expanded(
-                        child: _SelectionTile(
-                          icon: Icons.calendar_today_rounded,
-                          label: 'Fecha',
-                          value: AppFormatters.shortDate(_startAt),
-                          onTap: _pickStartDate,
-                        ),
+              const SizedBox(height: 20),
+              const _Label('Categoría'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: VehicleCategory.values
+                    .where((category) => category != VehicleCategory.all)
+                    .map(
+                      (category) => CarmanFilterChip(
+                        label: category.label,
+                        selected: _draft.category == category,
+                        onTap: () => setState(() {
+                          _draft = _draft.copyWith(
+                            category: _draft.category == category
+                                ? VehicleCategory.all
+                                : category,
+                          );
+                        }),
                       ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: _SelectionTile(
-                          icon: Icons.schedule_rounded,
-                          label: 'Inicio',
-                          value: AppFormatters.time(_startAt),
-                          onTap: _pickStartDate,
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: _SelectionTile(
-                          icon: Icons.timelapse_rounded,
-                          label: 'Duración',
-                          value: '$_hourlyDuration h',
-                          onTap: _pickDuration,
-                          highlighted: true,
-                        ),
-                      ),
-                    ],
-                  )
-                : Row(
-                    children: [
-                      Expanded(
-                        child: _SelectionTile(
-                          icon: Icons.event_available_rounded,
-                          label: 'Desde',
-                          value:
-                              '${AppFormatters.shortDate(_startAt)} · ${AppFormatters.time(_startAt)}',
-                          onTap: _pickStartDate,
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: _SelectionTile(
-                          icon: Icons.event_busy_rounded,
-                          label: 'Hasta',
-                          value:
-                              '${AppFormatters.shortDate(_endAt)} · ${AppFormatters.time(_endAt)}',
-                          onTap: _pickEndDate,
-                          highlighted: true,
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 20),
-          const _Label('Categoría'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: VehicleCategory.values
-                .where((category) => category != VehicleCategory.all)
-                .map(
-                  (category) => CarmanFilterChip(
-                    label: category.label,
-                    selected: _draft.category == category,
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 20),
+              const _Label('Filtros'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  CarmanFilterChip(
+                    label: 'Apertura móvil',
+                    selected: _draft.instantBookOnly,
                     onTap: () => setState(() {
                       _draft = _draft.copyWith(
-                        category: _draft.category == category
-                            ? VehicleCategory.all
-                            : category,
+                        instantBookOnly: !_draft.instantBookOnly,
                       );
                     }),
                   ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 20),
-          const _Label('Filtros'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              CarmanFilterChip(
-                label: 'Apertura móvil',
-                selected: _draft.instantBookOnly,
-                onTap: () => setState(() {
-                  _draft = _draft.copyWith(
-                    instantBookOnly: !_draft.instantBookOnly,
-                  );
-                }),
-              ),
-              CarmanFilterChip(
-                label: 'Cancelación gratis',
-                selected: _draft.freeCancellationOnly,
-                onTap: () => setState(() {
-                  _draft = _draft.copyWith(
-                    freeCancellationOnly: !_draft.freeCancellationOnly,
-                  );
-                }),
-              ),
-              CarmanFilterChip(
-                label: 'Automático',
-                selected: _draft.transmission == TransmissionType.automatic,
-                onTap: () => setState(() {
-                  _draft = _draft.transmission == TransmissionType.automatic
-                      ? _draft.copyWith(clearTransmission: true)
-                      : _draft.copyWith(
-                          transmission: TransmissionType.automatic,
-                        );
-                }),
-              ),
-              CarmanFilterChip(
-                label: _draft.maxPrice == null
-                    ? 'Precio'
-                    : 'Hasta ${AppFormatters.money(_draft.maxPrice!)}',
-                selected: _draft.maxPrice != null,
-                showClose: _draft.maxPrice != null,
-                onTap: () {
-                  if (_draft.maxPrice != null) {
-                    setState(() {
-                      _draft = _draft.copyWith(clearMaxPrice: true);
-                    });
-                  } else {
-                    _pickPrice();
-                  }
-                },
-              ),
-              CarmanFilterChip(
-                label: '5+ plazas',
-                selected: _draft.minSeats == 5,
-                onTap: () => setState(() {
-                  _draft = _draft.minSeats == 5
-                      ? _draft.copyWith(clearSeats: true)
-                      : _draft.copyWith(minSeats: 5);
-                }),
+                  CarmanFilterChip(
+                    label: 'Cancelación gratis',
+                    selected: _draft.freeCancellationOnly,
+                    onTap: () => setState(() {
+                      _draft = _draft.copyWith(
+                        freeCancellationOnly: !_draft.freeCancellationOnly,
+                      );
+                    }),
+                  ),
+                  CarmanFilterChip(
+                    label: 'Automático',
+                    selected: _draft.transmission == TransmissionType.automatic,
+                    onTap: () => setState(() {
+                      _draft = _draft.transmission == TransmissionType.automatic
+                          ? _draft.copyWith(clearTransmission: true)
+                          : _draft.copyWith(
+                              transmission: TransmissionType.automatic,
+                            );
+                    }),
+                  ),
+                  CarmanFilterChip(
+                    label: _draft.maxPrice == null
+                        ? 'Precio'
+                        : 'Hasta ${AppFormatters.money(_draft.maxPrice!)}',
+                    selected: _draft.maxPrice != null,
+                    showClose: _draft.maxPrice != null,
+                    onTap: () {
+                      if (_draft.maxPrice != null) {
+                        setState(() {
+                          _draft = _draft.copyWith(clearMaxPrice: true);
+                        });
+                      } else {
+                        _pickPrice();
+                      }
+                    },
+                  ),
+                  CarmanFilterChip(
+                    label: '5+ plazas',
+                    selected: _draft.minSeats == 5,
+                    onTap: () => setState(() {
+                      _draft = _draft.minSeats == 5
+                          ? _draft.copyWith(clearSeats: true)
+                          : _draft.copyWith(minSeats: 5);
+                    }),
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
-      );
+          );
         },
       ),
       bottomNavigationBar: Container(

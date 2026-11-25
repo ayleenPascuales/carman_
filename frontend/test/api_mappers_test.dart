@@ -64,6 +64,24 @@ void main() {
       expect(reservation.pickupPoint.name, 'Bocagrande');
     });
 
+    test('mapea un punto del esquema TiDB sin atribuirle una ciudad', () {
+      final reservation = ApiMappers.reservation({
+        'vehiculo': vehicleJson,
+        'puntoRecogida': {
+          'idPunto': 7,
+          'nombre': 'Punto de prueba',
+          'direccion': 'Dirección de prueba',
+          'latitud': '4.600000',
+          'longitud': '-74.100000',
+        },
+      });
+
+      expect(reservation.pickupPoint.id, '7');
+      expect(reservation.pickupPoint.city, isEmpty);
+      expect(reservation.pickupPoint.latitude, 4.6);
+      expect(reservation.pickupPoint.longitude, -74.1);
+    });
+
     test('maps notifications', () {
       final notification = ApiMappers.notification({
         'idNotificacion': 12,
