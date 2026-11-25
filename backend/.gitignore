@@ -44,6 +44,8 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+.env.*
+!.env.example
 
 # temp directory
 .temp
@@ -60,3 +62,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Credenciales privadas de Firebase
 firebase/
+.vercel/

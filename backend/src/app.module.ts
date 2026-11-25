@@ -13,14 +13,21 @@ import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { validateEnv } from './config/validate-env';
+import { HealthModule } from './health/health.module';
+import { PuntosModule } from './puntos/puntos.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
-    ScheduleModule.forRoot(),
+    // Un proceso serverless no ejecuta cron de forma continua.
+    ...(process.env.VERCEL ? [] : [ScheduleModule.forRoot()]),
     DatabaseModule,
+    HealthModule,
+    PuntosModule,
     PersonasModule,
     VehiculosModule,
     RutasModule,

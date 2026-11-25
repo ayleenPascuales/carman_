@@ -1,5 +1,5 @@
-import { Injectable, Inject, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Injectable, Inject, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import * as bcrypt from 'bcrypt';
 import { RegistroInicialDto, Rol } from './dto/registroInicial.dto';
 import { AgregarRolDto, RolAdicional } from './dto/agregarRol.dto';
@@ -7,18 +7,22 @@ import { CrearLicenciaDto } from './dto/crearLicencia.dto';
 import { AuthService } from '../auth/auth.service';
 import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
 import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
-import { ReservasService } from '../reservas/reservas.service';
+import { DeliveryError, VerificationService } from '../auth/verification.service';
 
 @Injectable()
 export class PersonasService {
+    private readonly logger = new Logger(PersonasService.name);
     constructor(
         @Inject('DATABASE_CONNECTION')
         private readonly database: Pool,
         private readonly authService: AuthService,
-        private readonly reservasService: ReservasService
+        private readonly verification: VerificationService,
     ) { }
 
     async registroInicial(dto: RegistroInicialDto) {
+        this.verification.validarTelefono(dto.persona.telefono);
+        this.verification.comprobarConfiguracion();
+        await this.verification.comprobarAlmacenamiento();
         const esCliente = dto.roles === Rol.CLIENTE;
         const esConductor = dto.roles === Rol.CONDUCTOR;
         const esPropietario = dto.roles === Rol.PROPIETARIO;
@@ -68,8 +72,7 @@ export class PersonasService {
             );
         }
 
-        const connection = await this.database.getConnection();
-
+        let connection: PoolConnection | undefined;
         let uidFirebase: string | undefined;
         let transaccionIniciada = false;
         let registroConfirmado = false;
@@ -85,6 +88,7 @@ export class PersonasService {
                 10
             );
 
+            connection = await this.database.getConnection();
             await connection.beginTransaction();
             transaccionIniciada = true;
 
@@ -206,13 +210,28 @@ export class PersonasService {
             await connection.commit();
             registroConfirmado = true;
 
+            // El correo se solicita tras el commit. Si falla, la cuenta ya existe
+            // y el usuario debe iniciar sesión y usar el reenvío.
+            let correoEnviado = false;
+            try {
+                await this.verification.enviarCorreoInicial(
+                    uidFirebase, dto.persona.email, dto.persona.contrasena,
+                );
+                correoEnviado = true;
+            } catch (error) {
+                this.logger.warn(`No se pudo enviar el correo de activación: ${
+                    error instanceof DeliveryError ? error.diagnostic : 'ERROR_DESCONOCIDO'
+                }`);
+            }
             return {
-                mensaje: 'Registro realizado correctamente. ',
+                mensaje: 'Cuenta creada. Activa tu correo y solicita el SMS para verificar el teléfono.',
                 idPersona, rol: dto.roles,
+                correoEnviado,
+                smsEnviado: false,
             };
 
         } catch (error) {
-            if (transaccionIniciada && !registroConfirmado) {
+            if (connection && transaccionIniciada && !registroConfirmado) {
                 try {
                     await connection.rollback();
                 } catch {
@@ -240,7 +259,7 @@ export class PersonasService {
             throw error;
 
         } finally {
-            connection.release();
+            connection?.release();
         }
 
     }
@@ -286,18 +305,16 @@ export class PersonasService {
             }
 
             const [licencias] = await connection.execute<RowDataPacket[]>(
-                `SELECT idLicencia, numeroDocumento, estado, 
-                DATE_FORMAT(fechaExpiracion, '%Y-%m-%d') AS fechaExpiracion
+                `SELECT idLicencia, numeroDocumento, estado,
+                fechaExpiracion >= CURDATE() AS licencia_vigente
                 FROM  licencia WHERE idPersona = ? LIMIT 1 FOR UPDATE`, [idPersona],);
 
             const licenciaExistente = licencias[0];
             let licenciaVigente = false;
 
             if (licenciaExistente) {
-                const fechaExpiracion = new Date(`${(licenciaExistente.fechaExpiracion).slice(0, 10)}T00:00:00`);
-                const hoy = new Date();
-                hoy.setHours(0, 0, 0, 0);
-                licenciaVigente = licenciaExistente.estado === 'Vigente' && fechaExpiracion >= hoy;
+                licenciaVigente = licenciaExistente.estado === 'Vigente'
+                    && Number(licenciaExistente.licencia_vigente) === 1;
             }
             if (licenciaExistente?.estado === 'Suspendida' && dto.licencia) {
                 throw new BadRequestException(
@@ -625,8 +642,9 @@ export class PersonasService {
             `SELECT 
             EXISTS(SELECT 1 FROM cliente WHERE idPersona = ?) AS cliente,
             EXISTS(SELECT 1 FROM conductor WHERE idPersona = ?) AS conductor,
-            EXISTS(SELECT 1 FROM propietario WHERE idPersona = ?) AS propietario`,
-            [idPersona, idPersona, idPersona],
+            EXISTS(SELECT 1 FROM propietario WHERE idPersona = ?) AS propietario,
+            EXISTS(SELECT 1 FROM administrador WHERE idPersona = ? AND estado = 'Activo') AS administrador`,
+            [idPersona, idPersona, idPersona, idPersona],
         );
         return {
             ...personas[0],
@@ -634,6 +652,7 @@ export class PersonasService {
                 cliente: Boolean(roles[0].cliente),
                 conductor: Boolean(roles[0].conductor),
                 propietario: Boolean(roles[0].propietario),
+                administrador: Boolean(roles[0].administrador),
             },
         };
     }
@@ -765,5 +784,4 @@ export class PersonasService {
             reservasAsignadas
         };
     }
-
 }
