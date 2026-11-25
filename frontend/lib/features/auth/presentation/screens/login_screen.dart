@@ -58,7 +58,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     if (success) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      context.go('/home');
+      context.go(
+        ref.read(authControllerProvider).pendingVerification
+            ? '/verify-otp'
+            : '/home',
+      );
     } else {
       final error = ref.read(authControllerProvider).error;
       if (error != null) {

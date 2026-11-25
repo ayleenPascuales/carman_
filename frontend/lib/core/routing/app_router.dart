@@ -71,7 +71,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == AppRoutes.forgotPassword;
 
       if (!auth.isAuthenticated && !isPublic) {
-        return AppRoutes.welcome;
+        return auth.pendingVerification
+            ? AppRoutes.verifyOtp
+            : AppRoutes.welcome;
       }
       if (auth.isAuthenticated && isAuthFlow) {
         return AppRoutes.home;
@@ -92,17 +94,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.register,
-        builder: (context, state) => const ResponsiveRouteFrame(
-          maxWidth: 680,
-          child: RegisterScreen(),
-        ),
+        builder: (context, state) =>
+            const ResponsiveRouteFrame(maxWidth: 680, child: RegisterScreen()),
       ),
       GoRoute(
         path: AppRoutes.verifyOtp,
-        builder: (context, state) => const ResponsiveRouteFrame(
-          maxWidth: 560,
-          child: OtpScreen(),
-        ),
+        builder: (context, state) =>
+            const ResponsiveRouteFrame(maxWidth: 560, child: OtpScreen()),
       ),
       GoRoute(
         path: AppRoutes.forgotPassword,
@@ -164,10 +162,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.search,
-        builder: (context, state) => const ResponsiveRouteFrame(
-          maxWidth: 900,
-          child: SearchScreen(),
-        ),
+        builder: (context, state) =>
+            const ResponsiveRouteFrame(maxWidth: 900, child: SearchScreen()),
       ),
       GoRoute(
         path: '/vehicle/:id',
@@ -187,10 +183,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.checkout,
-        builder: (context, state) => const ResponsiveRouteFrame(
-          maxWidth: 960,
-          child: CheckoutScreen(),
-        ),
+        builder: (context, state) =>
+            const ResponsiveRouteFrame(maxWidth: 960, child: CheckoutScreen()),
       ),
       GoRoute(
         path: AppRoutes.paymentMethods,

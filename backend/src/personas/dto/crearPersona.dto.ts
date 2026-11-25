@@ -1,4 +1,4 @@
-import { IsEmail, IsDateString, IsNotEmpty, IsString, MaxLength, MinLength, IsUrl, } from "class-validator";
+import { IsEmail, IsDateString, IsNotEmpty, IsString, MaxLength, MinLength, IsUrl, Matches, } from "class-validator";
 
 export class CrearPersonaDto {
 
@@ -35,6 +35,7 @@ export class CrearPersonaDto {
     @IsString()
     @IsNotEmpty()
     @MaxLength(20)
+    @Matches(/^\+[1-9]\d{7,14}$/, { message: 'El teléfono debe incluir indicativo: +573001234567.' })
     telefono: string;
 
     @IsNotEmpty()

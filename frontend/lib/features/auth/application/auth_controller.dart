@@ -14,6 +14,11 @@ class AuthState {
     this.isSubmitting = false,
     this.error,
     this.remember = true,
+    this.pendingVerification = false,
+    this.emailVerified = true,
+    this.phoneVerified = true,
+    this.smsSent = true,
+    this.emailSent = true,
   });
 
   final AuthStatus status;
@@ -21,6 +26,11 @@ class AuthState {
   final bool isSubmitting;
   final String? error;
   final bool remember;
+  final bool pendingVerification;
+  final bool emailVerified;
+  final bool phoneVerified;
+  final bool smsSent;
+  final bool emailSent;
 
   bool get isAuthenticated => status == AuthStatus.authenticated;
 
@@ -30,6 +40,11 @@ class AuthState {
     bool? isSubmitting,
     String? error,
     bool? remember,
+    bool? pendingVerification,
+    bool? emailVerified,
+    bool? phoneVerified,
+    bool? smsSent,
+    bool? emailSent,
     bool clearError = false,
   }) {
     return AuthState(
@@ -38,6 +53,11 @@ class AuthState {
       isSubmitting: isSubmitting ?? this.isSubmitting,
       error: clearError ? null : (error ?? this.error),
       remember: remember ?? this.remember,
+      pendingVerification: pendingVerification ?? this.pendingVerification,
+      emailVerified: emailVerified ?? this.emailVerified,
+      phoneVerified: phoneVerified ?? this.phoneVerified,
+      smsSent: smsSent ?? this.smsSent,
+      emailSent: emailSent ?? this.emailSent,
     );
   }
 }
@@ -80,11 +100,25 @@ class AuthController extends Notifier<AuthState> {
             password: password,
             remember: remember ?? state.remember,
           );
-      state = AuthState(
-        status: AuthStatus.authenticated,
-        user: session.user,
-        remember: session.remember,
-      );
+      if (!session.activated) {
+        _pendingSession = session;
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          pendingVerification: true,
+          emailVerified: session.emailVerified,
+          phoneVerified: session.phoneVerified,
+          smsSent: session.smsSent,
+          emailSent: session.emailSent,
+          remember: session.remember,
+        );
+      } else {
+        _pendingSession = null;
+        state = AuthState(
+          status: AuthStatus.authenticated,
+          user: session.user,
+          remember: session.remember,
+        );
+      }
       return true;
     } on AppException catch (error) {
       state = state.copyWith(isSubmitting: false, error: error.message);
@@ -104,7 +138,15 @@ class AuthController extends Notifier<AuthState> {
       _pendingSession = await ref
           .read(authRepositoryProvider)
           .register(request);
-      state = state.copyWith(isSubmitting: false);
+      final pending = _pendingSession!;
+      state = state.copyWith(
+        isSubmitting: false,
+        pendingVerification: !pending.activated,
+        emailVerified: pending.emailVerified,
+        phoneVerified: pending.phoneVerified,
+        smsSent: pending.smsSent,
+        emailSent: pending.emailSent,
+      );
       return true;
     } on AppException catch (error) {
       state = state.copyWith(isSubmitting: false, error: error.message);
@@ -126,21 +168,7 @@ class AuthController extends Notifier<AuthState> {
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await ref.read(authRepositoryProvider).verifyOtp(code);
-      final pending = _pendingSession;
-      if (pending != null) {
-        final store = ref.read(sessionStoreProvider);
-        await store.saveUser(pending.user);
-        await store.saveToken(pending.token);
-        await store.setRememberSession(true);
-        _pendingSession = null;
-        state = AuthState(
-          status: AuthStatus.authenticated,
-          user: pending.user,
-          remember: true,
-        );
-      } else {
-        state = state.copyWith(isSubmitting: false);
-      }
+      await _refreshVerificationStatus();
       return true;
     } on AppException catch (error) {
       state = state.copyWith(isSubmitting: false, error: error.message);
@@ -156,6 +184,49 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> resendOtp() async {
     await ref.read(authRepositoryProvider).resendOtp(pendingPhone ?? '');
+    state = state.copyWith(smsSent: true, clearError: true);
+  }
+
+  Future<void> resendEmailVerification() async {
+    await ref.read(authRepositoryProvider).resendEmailVerification();
+    state = state.copyWith(emailSent: true, clearError: true);
+  }
+
+  Future<bool> refreshVerification() async {
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _refreshVerificationStatus();
+      return state.isAuthenticated;
+    } on AppException catch (error) {
+      state = state.copyWith(isSubmitting: false, error: error.message);
+      return false;
+    }
+  }
+
+  Future<void> _refreshVerificationStatus() async {
+    final status = await ref.read(authRepositoryProvider).verificationStatus();
+    final pending = _pendingSession;
+    if (status.activated && pending != null) {
+      final store = ref.read(sessionStoreProvider);
+      await store.saveUser(pending.user);
+      await store.saveToken(pending.token);
+      await store.setRememberSession(pending.remember);
+      _pendingSession = null;
+      state = AuthState(
+        status: AuthStatus.authenticated,
+        user: pending.user,
+        remember: pending.remember,
+      );
+    } else {
+      state = state.copyWith(
+        isSubmitting: false,
+        pendingVerification: pending != null,
+        emailVerified: status.emailVerified,
+        phoneVerified: status.phoneVerified,
+        smsSent: status.phoneVerified || state.smsSent,
+        emailSent: status.emailVerified || state.emailSent,
+      );
+    }
   }
 
   Future<bool> requestPasswordReset(String email) async {

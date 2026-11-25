@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "inactive-accounts": {
+      "schedule": "0 2 * * *",
+      "timezone": "America/Bogota",
+      "path": "/internal/inactive-accounts",
+      "requestMethod": "GET"
+    }
+  }
+}

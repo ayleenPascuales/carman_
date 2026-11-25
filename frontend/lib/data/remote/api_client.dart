@@ -29,6 +29,7 @@ class ApiClient {
     String path, {
     Object? body,
     String? token,
+    Duration timeout = const Duration(seconds: 12),
   }) async {
     final uri = Uri.parse('$_baseUrl$path');
     return _send(
@@ -37,6 +38,7 @@ class ApiClient {
         headers: _headers(token),
         body: jsonEncode(body ?? const <String, dynamic>{}),
       ),
+      timeout: timeout,
     );
   }
 
@@ -62,10 +64,11 @@ class ApiClient {
   };
 
   Future<Map<String, dynamic>> _send(
-    Future<http.Response> Function() request,
-  ) async {
+    Future<http.Response> Function() request, {
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     try {
-      final response = await request().timeout(const Duration(seconds: 12));
+      final response = await request().timeout(timeout);
       final decoded = response.body.isEmpty
           ? <String, dynamic>{}
           : jsonDecode(response.body);

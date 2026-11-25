@@ -1,39 +1,21 @@
-import { Injectable, Inject, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { cert, getApp, getApps, initializeApp } from 'firebase-admin';
-import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import type { Auth, DecodedIdToken } from 'firebase-admin/auth';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class AuthService {
-    private readonly firebaseAuth;
-
     constructor(
         @Inject('DATABASE_CONNECTION')
         private readonly database: Pool,
-        private readonly configService: ConfigService,) {
-
-        const rutaCredenciales = resolve(
-            process.cwd(), 'firebase', 'serviceAccountKey.json',
-        );
-
-        const credenciales = JSON.parse(
-            readFileSync(rutaCredenciales, 'utf8'),
-        );
-
-        const firebaseApp = getApps().length > 0
-            ? getApp() : initializeApp({
-                credential: cert(credenciales),
-            });
-        this.firebaseAuth = getAuth(firebaseApp);
-    }
+        private readonly configService: ConfigService,
+        @Inject('FIREBASE_AUTH') private readonly firebaseAuth: Auth,
+    ) {}
 
     async verificarToken(token: string): Promise<DecodedIdToken> {
         try {
-            return await this.firebaseAuth.verifyIdToken(token);
+            return await this.firebaseAuth.verifyIdToken(token, true);
         } catch {
             throw new UnauthorizedException(
                 'El token de autenticación no es válido o ha expirado. '
@@ -45,6 +27,12 @@ export class AuthService {
         const usuario = await this.firebaseAuth.createUser({
             email, password: contrasena,
         });
+        try {
+            await this.firebaseAuth.setCustomUserClaims(usuario.uid, { requiresVerification: true });
+        } catch (error) {
+            await this.firebaseAuth.deleteUser(usuario.uid);
+            throw error;
+        }
         return usuario.uid;
     }
 
@@ -53,16 +41,14 @@ export class AuthService {
     }
 
     async iniciarSesion(identificador: string, contrasena: string) {
-        let email = identificador;
-
         const [personas] = await this.database.query<RowDataPacket[]>(
-            `SELECT email, estado FROM persona
+            `SELECT email, estado, uidFirebase, idPersona FROM persona
             WHERE ${identificador.includes('@') ? 'email' : 'usuario'} = ?
             LIMIT 1`, [identificador]
         );
 
         const persona = personas[0] as {
-            email: string; estado: string;
+            email: string; estado: string; uidFirebase: string; idPersona: number;
         } | undefined;
 
         if (!persona) {
@@ -73,23 +59,30 @@ export class AuthService {
                 'Tu cuenta ha sido suspendida. Contacta con administracion. '
             );
         }
-        email = persona.email;
-
         const apiKey = this.configService.getOrThrow<string>(
             'FIREBASE_API_KEY',
         );
 
-        const respuesta = await fetch(
-            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', },
-                body: JSON.stringify({
-                    email, password: contrasena, returnSecureToken: true,
-                }),
-            },
-        );
+        let respuesta: Response;
+        try {
+            respuesta = await fetch(
+                `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: persona.email, password: contrasena, returnSecureToken: true,
+                    }),
+                    signal: AbortSignal.timeout(10_000),
+                },
+            );
+        } catch {
+            throw new ServiceUnavailableException('No se pudo contactar con Firebase Authentication.');
+        }
         if (!respuesta.ok) {
+            if (respuesta.status >= 500 || respuesta.status === 429) {
+                throw new ServiceUnavailableException('Firebase Authentication no está disponible en este momento.');
+            }
             throw new UnauthorizedException(
                 'Credenciales incorrectas. '
             );
@@ -100,6 +93,12 @@ export class AuthService {
             refreshToken: string;
             expiresIn: string;
         };
+        const verified = await this.verificarToken(datos.idToken);
+        if (datos.localId !== persona.uidFirebase || verified.uid !== persona.uidFirebase) {
+            throw new UnauthorizedException('La cuenta de Firebase no coincide con el usuario registrado.');
+        }
+        await this.registrarActividad(persona.idPersona);
+        await this.sincronizarEmailVerificado(persona.idPersona, verified.email_verified === true);
 
         return {
             uid: datos.localId,
@@ -180,10 +179,17 @@ export class AuthService {
     async registrarActividad(idPersona: number): Promise<void> {
         await this.database.execute(
             `UPDATE persona SET estado = 'Activo', ultimaActividad = NOW()
-            WHERE idPersona = ? AND estado IN ('Activo', 'Inactivo')`, [idPersona]
+            WHERE idPersona = ? AND estado IN ('Activo', 'Inactivo')
+            AND (estado = 'Inactivo' OR ultimaActividad IS NULL
+            OR ultimaActividad < DATE_SUB(NOW(), INTERVAL 1 DAY))`, [idPersona]
         );
     }
 
-
-
+    async sincronizarEmailVerificado(idPersona: number, verificado: boolean): Promise<void> {
+        await this.database.execute(
+            `UPDATE persona SET emailVerificado = ?
+            WHERE idPersona = ? AND emailVerificado <> ?`,
+            [verificado, idPersona, verificado],
+        );
+    }
 }

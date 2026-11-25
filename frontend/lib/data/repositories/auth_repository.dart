@@ -11,11 +11,40 @@ class AuthSession {
     required this.user,
     required this.token,
     required this.remember,
+    this.activated = true,
+    this.emailVerified = true,
+    this.phoneVerified = true,
+    this.smsSent = true,
+    this.emailSent = true,
   });
 
   final UserProfile user;
   final String token;
   final bool remember;
+  final bool activated;
+  final bool emailVerified;
+  final bool phoneVerified;
+  final bool smsSent;
+  final bool emailSent;
+}
+
+class VerificationStatus {
+  const VerificationStatus({
+    required this.activated,
+    required this.emailVerified,
+    required this.phoneVerified,
+  });
+
+  final bool activated;
+  final bool emailVerified;
+  final bool phoneVerified;
+
+  factory VerificationStatus.fromJson(Map<String, dynamic> json) =>
+      VerificationStatus(
+        activated: json['activada'] == true,
+        emailVerified: json['correoVerificado'] == true,
+        phoneVerified: json['telefonoVerificado'] == true,
+      );
 }
 
 class RegistrationRequest {
@@ -62,6 +91,8 @@ abstract interface class AuthRepository {
   Future<void> resendOtp(String phone);
 
   Future<void> verifyOtp(String code);
+  Future<VerificationStatus> verificationStatus();
+  Future<void> resendEmailVerification();
 
   Future<void> resetPassword({required String email, required String password});
 
@@ -188,6 +219,19 @@ class DemoAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<VerificationStatus> verificationStatus() async =>
+      const VerificationStatus(
+        activated: true,
+        emailVerified: true,
+        phoneVerified: true,
+      );
+
+  @override
+  Future<void> resendEmailVerification() async {
+    await Future<void>.delayed(_latency);
+  }
+
+  @override
   Future<void> resetPassword({
     required String email,
     required String password,
@@ -220,6 +264,15 @@ class ApiAuthRepository implements AuthRepository {
 
   final ApiClient _api;
   final SessionStore _store;
+  String? _pendingToken;
+
+  String _verificationToken() {
+    final token = _pendingToken ?? _store.loadToken();
+    if (token == null || token.isEmpty) {
+      throw const AuthException('Inicia sesión para verificar tu cuenta.');
+    }
+    return token;
+  }
 
   @override
   Future<AuthSession> login({
@@ -235,12 +288,28 @@ class ApiAuthRepository implements AuthRepository {
     if (token.isEmpty) {
       throw const AuthException('El servidor no devolvió una sesión válida.');
     }
+    final status = VerificationStatus.fromJson(
+      await _api.get(ApiEndpoints.verification, token: token),
+    );
     final profile = await _api.get(ApiEndpoints.profile, token: token);
     final user = _mapProfile(profile, email);
-    if (remember) await _store.saveUser(user);
-    await _store.saveToken(token);
-    await _store.setRememberSession(remember);
-    return AuthSession(user: user, token: token, remember: remember);
+    if (status.activated) {
+      if (remember) await _store.saveUser(user);
+      await _store.saveToken(token);
+      await _store.setRememberSession(remember);
+      _pendingToken = null;
+    } else {
+      _pendingToken = token;
+    }
+    return AuthSession(
+      user: user,
+      token: token,
+      remember: remember,
+      activated: status.activated,
+      emailVerified: status.emailVerified,
+      phoneVerified: status.phoneVerified,
+      smsSent: status.activated,
+    );
   }
 
   @override
@@ -271,11 +340,34 @@ class ApiAuthRepository implements AuthRepository {
           'fotoLicencia': 'https://carman.app/licencias/pendiente.jpg',
         },
     };
-    await _api.post(ApiEndpoints.register, body: payload);
-    return login(
-      email: request.email,
-      password: request.password,
-      remember: true,
+    final delivery = await _api.post(
+      ApiEndpoints.register,
+      body: payload,
+      timeout: const Duration(seconds: 45),
+    );
+    // El POST de registro ya confirmó la cuenta: un fallo de login/perfil
+    // posterior NO debe invitar a repetirlo y crear un duplicado.
+    late final AuthSession session;
+    try {
+      session = await login(
+        email: request.email,
+        password: request.password,
+        remember: true,
+      );
+    } catch (_) {
+      throw const AuthException(
+        'Tu cuenta ya se creó, pero no pudimos abrir la sesión. No repitas el registro: inicia sesión y comprueba el enlace en tu correo.',
+      );
+    }
+    return AuthSession(
+      user: session.user,
+      token: session.token,
+      remember: session.remember,
+      activated: session.activated,
+      emailVerified: session.emailVerified,
+      phoneVerified: session.phoneVerified,
+      smsSent: delivery['smsEnviado'] == true,
+      emailSent: delivery['correoEnviado'] == true,
     );
   }
 
@@ -287,12 +379,28 @@ class ApiAuthRepository implements AuthRepository {
 
   @override
   Future<void> resendOtp(String phone) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _api.post(ApiEndpoints.resendPhone, token: _verificationToken());
   }
 
   @override
   Future<void> verifyOtp(String code) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _api.post(
+      ApiEndpoints.confirmPhone,
+      token: _verificationToken(),
+      body: {'codigo': code},
+    );
+  }
+
+  @override
+  Future<VerificationStatus> verificationStatus() async {
+    return VerificationStatus.fromJson(
+      await _api.get(ApiEndpoints.verification, token: _verificationToken()),
+    );
+  }
+
+  @override
+  Future<void> resendEmailVerification() async {
+    await _api.post(ApiEndpoints.resendEmail, token: _verificationToken());
   }
 
   @override

@@ -1,6 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
-import type { Pool } from 'mysql2/promise';
-import type { ResultSetHeader, RowDataPacket } from 'mysql2';
+import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { CrearVehiculoDto } from './dto/crearVehiculo.dto';
 import { ActualizarVehiculoDto } from './dto/actualizarVehiculo.dto';
 import { CambiarEstadoVehiculoDTO } from './dto/cambiarEstadoVehiculo.dto';
@@ -30,14 +29,14 @@ export class VehiculosService {
         }
 
         const [puntoRecogida] = await this.database.query<RowDataPacket[]>(
-            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ?`, [dto.idPuntoRecogida]
+            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoRecogida]
         );
         if (puntoRecogida.length === 0) {
             throw new NotFoundException('El punto de recogida seleccionado no existe. ')
         }
 
         const [puntoEntrega] = await this.database.query<RowDataPacket[]>(
-            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ?`, [dto.idPuntoEntrega]
+            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoEntrega]
         );
         if (puntoEntrega.length === 0) {
             throw new NotFoundException('El punto de entrega seleccionado no existe. ')
@@ -124,10 +123,19 @@ export class VehiculosService {
         if (dto.idPuntoRecogida !== undefined) {
             const [punto] = await this.database.query<RowDataPacket[]>(
                 `SELECT idPunto FROM punto_autorizado 
-                WHERE idPunto = ? AND activo = 1`, [dto.idPuntoRecogida]
+                WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoRecogida]
             );
             if (punto.length === 0) {
                 throw new NotFoundException('El punto de recogida no existe o esta inactivo. ');
+            }
+        }
+        if (dto.idPuntoEntrega !== undefined) {
+            const [punto] = await this.database.query<RowDataPacket[]>(
+                `SELECT idPunto FROM punto_autorizado
+                WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoEntrega]
+            );
+            if (punto.length === 0) {
+                throw new NotFoundException('El punto de entrega no existe o esta inactivo.');
             }
         }
 

@@ -382,7 +382,16 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d+\s]')),
             LengthLimitingTextInputFormatter(17),
           ],
-          validator: Validators.phone,
+          validator: (value) {
+            final error = Validators.phone(value);
+            if (error != null) return error;
+            if (AppConfig.useLiveApi &&
+                !RegExp(r'^\+[1-9]\d{7,14}$')
+                    .hasMatch(value!.replaceAll(RegExp(r'\s'), ''))) {
+              return 'Incluye indicativo internacional, por ejemplo +573001234567';
+            }
+            return null;
+          },
           helper: 'Te enviaremos un código SMS para verificar el número.',
         ),
         const SizedBox(height: 14),

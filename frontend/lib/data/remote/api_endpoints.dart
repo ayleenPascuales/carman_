@@ -6,6 +6,10 @@
 abstract final class ApiEndpoints {
   // Auth & people.
   static const login = '/auth/login';
+  static const verification = '/auth/verificacion';
+  static const resendEmail = '/auth/correo/reenviar';
+  static const resendPhone = '/auth/telefono/reenviar';
+  static const confirmPhone = '/auth/telefono/confirmar';
   static const profile = '/personas/perfil';
   static const register = '/personas/registro';
   static const roles = '/personas/roles';

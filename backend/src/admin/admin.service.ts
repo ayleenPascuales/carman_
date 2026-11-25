@@ -1,5 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException } from "@nestjs/common";
-import { ResultSetHeader, type Pool, type RowDataPacket } from "mysql2/promise";
+import type { Pool, RowDataPacket } from "mysql2/promise";
 import { RechazarRevisionDTO } from "./dto/rechazarRevision.dto";
 import { ResultadoRevisionDTO } from "./dto/resultadoRevision.dto";
 
@@ -101,8 +101,9 @@ export class AdminService {
             `SELECT 
                 EXISTS(SELECT 1 FROM cliente WHERE idPersona = ?) AS cliente,
                 EXISTS(SELECT 1 FROM conductor WHERE idPersona = ?) AS conductor,
-                EXISTS(SELECT 1 FROM propietario WHERE idPersona = ?) AS propietario`,
-            [idPersona, idPersona, idPersona],
+                EXISTS(SELECT 1 FROM propietario WHERE idPersona = ?) AS propietario,
+                EXISTS(SELECT 1 FROM administrador WHERE idPersona = ? AND estado = 'Activo') AS administrador`,
+            [idPersona, idPersona, idPersona, idPersona],
         );
         return {
             ...personas[0],
@@ -110,6 +111,7 @@ export class AdminService {
                 cliente: Boolean(roles[0].cliente),
                 conductor: Boolean(roles[0].conductor),
                 propietario: Boolean(roles[0].propietario),
+                administrador: Boolean(roles[0].administrador),
             },
         };
     }
@@ -260,7 +262,7 @@ export class AdminService {
                 )
             }
 
-            await conexion.execute<ResultSetHeader>(
+            await conexion.execute(
                 `INSERT INTO estado_tecnico_vehiculo(
                 idVehiculo,
                 kilometraje,
