@@ -26,3 +26,4 @@ frontend/.flutter-plugins-dependencies
 Thumbs.db
 .vercel
 .env*
+/descarga_tidb/

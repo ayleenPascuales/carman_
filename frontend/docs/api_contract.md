@@ -1,6 +1,6 @@
 # Contrato API · Carman Frontend ↔ NestJS
 
-Este documento define lo que el frontend Flutter ya consume. Los endpoints están centralizados en `lib/data/remote/api_endpoints.dart` y el mapeo defensivo en `lib/data/remote/api_mappers.dart`; si el backend cambia un nombre de campo, normalmente basta con ajustar esos dos archivos.
+Este documento distingue rutas **implementadas** de contratos **previstos pero no disponibles**. Flutter centraliza sus rutas en `lib/data/remote/api_endpoints.dart`; que una ruta aparezca allí no significa que NestJS la exponga. El mapeo está en `lib/data/remote/api_mappers.dart` y en los modelos. El flujo completo sigue disponible solo en modo demo.
 
 ## Activación
 
@@ -13,7 +13,7 @@ flutter run \
 - Base URL por defecto: `http://localhost:3000`.
 - Autenticación: `Authorization: Bearer <Firebase idToken>`.
 - Fechas: ISO 8601 (`2026-11-24T10:00:00`).
-- Importes: número decimal en USD.
+- Importes: números decimales; el esquema de TiDB no fija una moneda.
 - Respuestas de error sugeridas: `{ "statusCode": 400, "message": "..." }`.
 
 ## 1. Autenticación y personas
@@ -41,11 +41,12 @@ Usa el token. Respuesta compatible:
   "nombre": "Alex",
   "apellido": "Rivera",
   "email": "alex.rivera@carman.es",
-  "telefono": "+57 300 123 4567",
+  "telefono": "+573001234567",
   "ciudad": "Cartagena",
   "documento": "1020304050",
   "fotoPerfil": "https://...",
   "fechaHoraRegistro": "2025-03-12T00:00:00",
+  "licenciaEstado": "Vigente",
   "roles": { "cliente": true, "conductor": false, "propietario": true }
 }
 ```
@@ -60,21 +61,21 @@ Usa el token. Respuesta compatible:
     "email": "maria@example.com",
     "usuario": "maria",
     "contrasena": "Carman123",
-    "telefono": "+57 300 000 0000",
+    "telefono": "+573000000000",
     "fechaNacimiento": "1994-05-20",
     "ciudad": "Medellín",
-    "direccion": "Por completar",
-    "fotoPerfil": "https://..."
+    "direccion": "Dirección opcional"
   },
-  "roles": "Cliente",
-  "licencia": {
-    "numeroDocumento": "LIC-123",
-    "fechaExpiracion": "2030-01-01",
-    "tipoLicencia": "B",
-    "fotoLicencia": "https://..."
-  }
+  "roles": "Cliente"
 }
 ```
+`direccion` y `fotoPerfil` son opcionales en la petición. Una licencia requiere
+un documento real alojado de forma segura: el frontend en modo API **no** envía
+una URL ficticia y todavía no tiene subida de fotos de licencia. El rol
+`Propietario` exige además al menos un vehículo válido en el mismo registro;
+ese formulario aún no recoge dichos datos. `usuario` es UNIQUE en TiDB: el
+formulario lo deriva hoy del prefijo del correo, por lo que registros con
+prefijos iguales pueden chocar aunque los correos sean diferentes.
 
 ### `PATCH /personas/perfil`
 ```json
@@ -82,26 +83,43 @@ Usa el token. Respuesta compatible:
 ```
 
 ### `POST /personas/roles`
-```json
-{ "roles": "Propietario" }
-```
+Ruta implementada. `{"roles":"Propietario"}` sin `vehiculos` falla: el
+backend exige al menos un vehículo válido y puntos activos en el mismo POST.
+El formulario Flutter en modo API aún no aporta esos datos y lo bloquea.
 
 ### `POST /personas/licencia`
+Ruta implementada en NestJS, pero Flutter en modo API **bloquea el formulario**
+hasta integrar subida segura y revisión de documentos. El backend registra
+`Vigente` por fecha futura: no equivale a validación documental.
 ```json
 {
   "numeroDocumento": "LIC-123",
   "fechaExpiracion": "2030-01-01",
   "tipoLicencia": "B",
-  "fotoLicencia": "https://...",
-  "fotoReverso": "https://..."
+  "fotoLicencia": "https://example.com/documento-autorizado.jpg"
 }
 ```
 
-> **Subida de imágenes:** hoy la UI selecciona imágenes con `image_picker` y guarda una referencia. Para producción se recomienda un endpoint multipart (`POST /archivos`) que devuelva la URL pública; luego enviar esa URL en `fotoLicencia`/`fotos`.
+> **Subida de imágenes:** algunas pantallas seleccionan imágenes con `image_picker`,
+> pero no existe almacenamiento seguro ni un endpoint de archivos. Antes de
+> registrar licencias/vehículos reales hay que integrar subida protegida y
+> guardar solo URLs verificadas; no usar documentos de ejemplo.
 
 ## 2. Vehículos
 
+### `GET /puntos-autorizados`
+Ruta implementada y pública. Parámetro opcional `ciudad` (máximo 50 caracteres);
+devuelve **un arreglo** de puntos activos con `idPunto`, `nombre`, `ciudad`
+(puede ser NULL), `direccion`, `latitud` y `longitud`. Los DECIMAL de TiDB
+pueden llegar como texto. El esquema no incluye distancia al usuario ni coste
+de entrega; Flutter en modo API no los inventa. No confundir este endpoint con
+los puntos de prueba del modo demo.
+
 ### `GET /vehiculos/catalogo`
+**Ruta futura: NestJS todavía no la implementa.** La petición coincide hoy con
+la ruta protegida `GET /vehiculos/:idVehiculo`: sin sesión responde 401 y
+con sesión tampoco devuelve un catálogo. El ejemplo siguiente es una aspiración del producto,
+**no** una respuesta que se haya verificado contra TiDB:
 Query parameters que puede enviar el frontend:
 `ciudad, categoria, modalidad, fechaInicio, fechaFin, precioMaximo, transmision, combustible, plazasMinimas, aperturaMovil, cancelacionGratis, orden, texto`.
 
@@ -147,13 +165,15 @@ Respuesta:
 El frontend también acepta los nombres en español/inglés que reconoce `Vehicle.fromJson` (`id`, `brand`, `model`, `category`, `photos`, etc.).
 
 ### `GET /vehiculos/:id`
-Token requerido. Respuesta `{ "vehiculo": { ... } }`.
+Token requerido y solo para vehículos del propietario autenticado. Hoy devuelve
+el objeto directamente, con las columnas de `vehiculo` y la ciudad/nombre del
+punto de recogida si existe. **No es el endpoint público del catálogo**.
 
 ### `GET /vehiculos/mis-vehiculos`
 Token requerido. Lista de vehículos del propietario.
 
 ### `POST /vehiculos`
-Token requerido; crea un vehículo. El frontend envía:
+Token requerido; crea un vehículo del propietario. El backend espera:
 ```json
 {
   "marca": "Tesla",
@@ -162,21 +182,29 @@ Token requerido; crea un vehículo. El frontend envía:
   "placa": "CAR-482",
   "capacidad": 5,
   "tipoVehiculo": "SUVs",
-  "combustible": "Eléctrico",
-  "transmision": "Automático",
-  "precioDia": 75,
-  "precioHora": 18,
-  "ciudad": "Cartagena",
-  "ubicacion": "Bocagrande",
+  "precioPorDia": 75,
   "descripcion": "...",
-  "idPuntoRecogida": 1,
-  "idPuntoEntrega": 1,
-  "fotos": ["https://..."],
-  "tarjetaPropiedad": "https://..."
+  "idPuntoRecogida": 7,
+  "idPuntoEntrega": 8,
+  "fotos": ["https://example.com/imagen-real.jpg"],
+  "tarjetaPropiedad": "https://example.com/documento-real.jpg"
 }
 ```
 
+Los IDs y URLs del ejemplo **no deben usarse como datos reales**. `precioPorDia`
+es opcional en el esquema, pero sin tarifa no se debe ofrecer el vehículo como
+disponible. `precioHora`, combustible, transmisión, ciudad y ubicación escrita
+no se almacenan en `vehiculo`; la ciudad se obtiene del punto asociado. La
+respuesta de POST solo confirma `idVehiculo` y un mensaje; el cliente consulta
+después `GET /vehiculos/:id`. El formulario Flutter actual carece de selección
+de puntos y subida de fotos/documentos: en modo API no enviará marcadores
+ficticios y no completará el alta hasta integrar esos campos. **Los atributos
+avanzados del catálogo mostrado arriba son todavía un contrato futuro**.
+
 ## 3. Reservas
+
+**Rutas futuras.** NestJS no ofrece todavía reserva, cobro ni disponibilidad
+por fecha. Los ejemplos siguientes son el contrato previsto, no rutas probadas.
 
 ### `GET /reservas/mias`
 Token requerido. Respuesta:
@@ -248,6 +276,8 @@ Sin body. Devuelve `{ "reserva": { ... } }` o al menos `{ "ok": true }`.
 
 ## 4. Notificaciones
 
+**Rutas futuras;** las tablas existen pero NestJS no expone estos endpoints.
+
 ### `GET /notificaciones`
 ```json
 {
@@ -272,6 +302,10 @@ Sin body. Marca todas como leídas.
 Sin body.
 
 ## 5. Panel de propietario
+
+**`GET /propietario/resumen` no está implementado.** Flutter intenta primero
+esa ruta y puede usar `GET /vehiculos/mis-vehiculos` como alternativa, sin
+métricas de ingresos ni reservas reales.
 
 ### `GET /propietario/resumen`
 ```json
@@ -308,7 +342,11 @@ Los endpoints de pago están reservados en `ApiEndpoints`:
 - `PATCH /pagos/metodos/:id`
 - `POST /pagos`
 
-La app actual usa métodos de demostración y una tarjeta de prueba. **No se debe enviar el número completo de tarjeta al backend propio**: la pasarela debe tokenizar en el cliente/servidor. Antes de producción hay que integrar Stripe, Mercado Pago u otra pasarela y reemplazar `PaymentController` por un `PaymentRepository` real.
+La app actual usa métodos de demostración y una tarjeta de prueba. **No se debe
+enviar el número completo de tarjeta al backend propio**: la pasarela debe
+tokenizar los datos y procesar pagos confirmados. El esquema actual prevé
+referencias de Wompi, pero no existe integración ni webhook: hay que elegir y
+validar una pasarela antes de habilitar pagos reales.
 
 
 ## 8. Panel de conductor

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:material_ui/material_ui.dart';
 
 enum VehicleCategory {
@@ -57,7 +59,7 @@ enum TransmissionType {
   final IconData icon;
 }
 
-enum OwnerBadge { superhost, verified, newHost }
+enum OwnerBadge { superhost, verified, newHost, unknown }
 
 class PickupPoint {
   const PickupPoint({
@@ -67,6 +69,7 @@ class PickupPoint {
     required this.address,
     required this.distance,
     this.isFree = true,
+    this.hasDeliveryDetails = true,
     this.latitude = 10.3910,
     this.longitude = -75.4794,
     this.type = 'hub',
@@ -78,6 +81,7 @@ class PickupPoint {
   final String address;
   final double distance;
   final bool isFree;
+  final bool hasDeliveryDetails;
   final double latitude;
   final double longitude;
   final String type;
@@ -180,13 +184,15 @@ class Vehicle {
 
   String get compactTitle => '$shortTitle $year';
 
-  String get primaryPhoto =>
-      photos.isNotEmpty ? photos.first : 'assets/images/cars/tesla_model_y.jpg';
+  // Si TiDB no tiene fotos, mostrar el icono neutro del widget; nunca la foto
+  // de un automóvil de demostración como si fuera el vehículo real.
+  String get primaryPhoto => photos.isNotEmpty ? photos.first : '';
 
   String get ownerBadgeLabel => switch (ownerBadge) {
     OwnerBadge.superhost => 'Super Anfitrión',
     OwnerBadge.verified => 'Anfitrión Verificado',
     OwnerBadge.newHost => 'Anfitrión Nuevo',
+    OwnerBadge.unknown => 'Anfitrión',
   };
 
   String get ownerFirstName {
@@ -272,13 +278,13 @@ class Vehicle {
   }
 
   factory Vehicle.fromJson(Map<String, dynamic> json) {
-    final rawPhotos = json['photos'] ?? json['fotos'];
-    final photos = switch (rawPhotos) {
-      List<dynamic>() => rawPhotos.map((photo) => '$photo').toList(),
-      String() when rawPhotos.isNotEmpty => rawPhotos.split(','),
-      _ => <String>[],
-    };
+    final photos = _photosFromApi(json['photos'] ?? json['fotos']);
     final pointJson = json['pickupPoint'] ?? json['puntoRecogida'];
+    final fromTiDb = json.containsKey('precioPorDia');
+    final dailyPrice =
+        _decimal(json['pricePerDay']) ??
+        _decimal(json['precioDia']) ??
+        _decimal(json['precioPorDia']);
     return Vehicle(
       id: '${json['id'] ?? json['idVehiculo'] ?? ''}',
       brand: '${json['brand'] ?? json['marca'] ?? 'Carman'}',
@@ -299,23 +305,22 @@ class Vehicle {
           (json['capacidad'] as num?)?.toInt() ??
           5,
       pricePerHour:
-          (json['pricePerHour'] as num?)?.toDouble() ??
-          (json['precioHora'] as num?)?.toDouble() ??
-          18,
-      pricePerDay:
-          (json['pricePerDay'] as num?)?.toDouble() ??
-          (json['precioDia'] as num?)?.toDouble() ??
-          75,
-      rating: (json['rating'] as num?)?.toDouble() ?? 4.9,
+          _decimal(json['pricePerHour']) ??
+          _decimal(json['precioHora']) ??
+          (fromTiDb ? 0 : 18),
+      pricePerDay: dailyPrice ?? (fromTiDb ? 0 : 75),
+      rating: (json['rating'] as num?)?.toDouble() ?? (fromTiDb ? 0 : 4.9),
       tripCount:
           (json['tripCount'] as num?)?.toInt() ??
           (json['viajes'] as num?)?.toInt() ??
           0,
-      ownerName:
-          '${json['ownerName'] ?? json['anfitrion'] ?? 'Anfitrión Carman'}',
+      ownerName: '${json['ownerName'] ?? json['anfitrion'] ?? 'Anfitrión'}',
+      ownerBadge: fromTiDb ? OwnerBadge.unknown : OwnerBadge.verified,
       locationName:
           '${json['locationName'] ?? json['ubicacion_actual'] ?? json['ubicacion'] ?? ''}',
-      city: '${json['city'] ?? json['ciudad'] ?? 'Cartagena'}',
+      // El esquema exportado de vehiculo no guarda ciudad: no atribuirle
+      // una ubicación inventada hasta que la API proporcione una.
+      city: '${json['city'] ?? json['ciudad'] ?? ''}',
       photos: photos,
       autonomyKm:
           (json['autonomyKm'] as num?)?.toInt() ??
@@ -333,20 +338,21 @@ class Vehicle {
       instantBook:
           json['instantBook'] as bool? ??
           json['aperturaMovil'] as bool? ??
-          true,
+          !fromTiDb,
       freeCancellation:
           json['freeCancellation'] as bool? ??
           json['cancelacionGratis'] as bool? ??
-          true,
-      isAvailable: json['isAvailable'] as bool? ?? true,
+          !fromTiDb,
+      isAvailable:
+          json['isAvailable'] as bool? ??
+          (!fromTiDb || (json['estado'] == 'Activo' && (dailyPrice ?? 0) > 0)),
       plate: '${json['plate'] ?? json['placa'] ?? ''}',
       description: '${json['description'] ?? json['descripcion'] ?? ''}',
       pickupPoint: pointJson is Map<String, dynamic>
           ? PickupPoint(
               id: '${pointJson['id'] ?? pointJson['idPuntoRecogida'] ?? ''}',
               name: '${pointJson['name'] ?? pointJson['nombre'] ?? ''}',
-              city:
-                  '${pointJson['city'] ?? pointJson['ciudad'] ?? 'Cartagena'}',
+              city: '${pointJson['city'] ?? pointJson['ciudad'] ?? ''}',
               address:
                   '${pointJson['address'] ?? pointJson['direccion'] ?? ''}',
               distance:
@@ -357,6 +363,27 @@ class Vehicle {
             )
           : null,
     );
+  }
+
+  static double? _decimal(Object? value) => switch (value) {
+    num() => value.toDouble(),
+    String() => double.tryParse(value),
+    _ => null,
+  };
+
+  static List<String> _photosFromApi(Object? value) {
+    if (value is List) return value.whereType<String>().toList();
+    if (value is! String || value.isEmpty) return [];
+    // mysql2 serializa las columnas JSON como texto en algunas conexiones.
+    if (value.trimLeft().startsWith('[')) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) return decoded.whereType<String>().toList();
+      } on FormatException {
+        // Compatibilidad con listas antiguas separadas por comas.
+      }
+    }
+    return value.split(',');
   }
 
   static FuelType _fuelFromJson(Object? value) {

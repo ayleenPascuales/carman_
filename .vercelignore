@@ -5,6 +5,9 @@
 **/.env.*
 **/*serviceAccount*.json
 **/*service-account*.json
+descarga_tidb/
+descarga_tidb
+descarga_tidb/**
 
 # Generated files and platforms not used by Flutter Web.
 **/node_modules

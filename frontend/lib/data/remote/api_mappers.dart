@@ -473,9 +473,11 @@ abstract final class ApiMappers {
   static PickupPoint? _pickup(Object? raw) {
     if (raw is! Map<String, dynamic>) return null;
     return PickupPoint(
-      id: _string(raw['id'] ?? raw['idPuntoRecogida']) ?? 'pickup',
+      id:
+          _string(raw['id'] ?? raw['idPunto'] ?? raw['idPuntoRecogida']) ??
+          'pickup',
       name: _string(raw['nombre'] ?? raw['name']) ?? 'Entrega',
-      city: _string(raw['ciudad'] ?? raw['city']) ?? 'Cartagena',
+      city: _string(raw['ciudad'] ?? raw['city']) ?? '',
       address: _string(raw['direccion'] ?? raw['address']) ?? '',
       distance: _double(raw['distancia'] ?? raw['distance']) ?? 0,
       isFree: raw['gratis'] as bool? ?? true,

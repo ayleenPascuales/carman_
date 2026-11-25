@@ -1,6 +1,12 @@
-import { IsArray, IsOptional, IsString, IsUrl, ArrayNotEmpty, MaxLength, Min, IsInt } from "class-validator";
+import { IsArray, IsOptional, IsString, IsUrl, ArrayNotEmpty, Max, MaxLength, Min, IsInt, IsNumber } from "class-validator";
 
 export class ActualizarVehiculoDto {
+
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0.01)
+    @Max(99999999.99)
+    precioPorDia?: number;
 
     @IsOptional()
     @IsArray()

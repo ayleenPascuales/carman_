@@ -163,7 +163,9 @@ class UserProfile {
       document: '${json['document'] ?? json['documento'] ?? ''}',
       avatarAsset: json['avatarAsset'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
-      roles: roles.isEmpty ? {UserRole.client} : roles,
+      // Una sesión de API puede tener cero roles: no otorgar "cliente" por
+      // defecto al recargarla desde SharedPreferences.
+      roles: roles,
       licenseStatus: LicenseStatus.fromApi(
         json['licenseStatus'] ?? json['license'],
       ),

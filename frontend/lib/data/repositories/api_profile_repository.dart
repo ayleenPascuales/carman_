@@ -48,23 +48,29 @@ class ApiProfileRepository implements ProfileRepository {
     UserProfile current,
     LicenseSubmission submission,
   ) async {
-    await _api.post(
-      ApiEndpoints.license,
-      token: _token(),
-      body: {
-        'numeroDocumento': submission.number,
-        'fechaExpiracion': submission.expiry.toIso8601String().substring(0, 10),
-        'tipoLicencia': submission.type,
-        'fotoLicencia': submission.frontImageReference,
-        if (submission.backImageReference != null)
-          'fotoReverso': submission.backImageReference,
-      },
+    // La UI solo entrega bytes locales o un asset de demostración. No enviar
+    // referencias local:// ni imágenes de ejemplo como documentos auténticos.
+    throw const AppException(
+      'La subida segura de licencias aún no está disponible en el modo API.',
+      code: 'license_upload_unavailable',
     );
-    return current.copyWith(licenseStatus: LicenseStatus.pendingReview);
   }
 
   @override
   Future<UserProfile> addRole(UserProfile current, UserRole role) async {
+    if (role == UserRole.owner) {
+      throw const AppException(
+        'Para activar el rol de propietario se requiere registrar un vehículo real en la misma solicitud. Este formulario aún no lo permite.',
+        code: 'owner_registration_unavailable',
+      );
+    }
+    if (role == UserRole.driver &&
+        current.licenseStatus != LicenseStatus.approved) {
+      throw const AppException(
+        'Para activar el rol de conductor se necesita una licencia vigente registrada.',
+        code: 'driver_license_required',
+      );
+    }
     await _api.post(
       ApiEndpoints.roles,
       token: _token(),
@@ -83,10 +89,10 @@ class ApiProfileRepository implements ProfileRepository {
             ApiEndpoints.vehicle(id),
             token: _token(),
           );
-          final raw = payload['vehiculo'] ?? payload['data'];
+          final raw = payload['vehiculo'] ?? payload['data'] ?? payload;
           if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);
-        } on AppException {
-          // A favorite that no longer exists should simply disappear.
+        } on AppException catch (error) {
+          if (error.code != 'http_404') rethrow;
         }
         return null;
       }),

@@ -23,6 +23,10 @@ class VehicleDraft {
     required this.city,
     required this.location,
     required this.description,
+    this.idPuntoRecogida,
+    this.idPuntoEntrega,
+    this.fotos = const [],
+    this.tarjetaPropiedad,
   });
 
   final String brand;
@@ -38,6 +42,10 @@ class VehicleDraft {
   final String city;
   final String location;
   final String description;
+  final int? idPuntoRecogida;
+  final int? idPuntoEntrega;
+  final List<String> fotos;
+  final String? tarjetaPropiedad;
 
   Map<String, dynamic> toApiJson() => {
     'marca': brand,
@@ -46,14 +54,12 @@ class VehicleDraft {
     'placa': plate,
     'capacidad': seats,
     'tipoVehiculo': category.label,
-    'combustible': fuel.label,
-    'transmision': transmission.label,
-    'precioDia': pricePerDay,
-    'precioHora': pricePerHour,
-    'ciudad': city,
-    'ubicacion': location,
+    'precioPorDia': pricePerDay,
+    'idPuntoRecogida': idPuntoRecogida,
+    'idPuntoEntrega': idPuntoEntrega,
     'descripcion': description,
-    'fotos': <String>[],
+    'fotos': fotos,
+    'tarjetaPropiedad': tarjetaPropiedad,
   };
 }
 
@@ -201,15 +207,59 @@ class ApiVehicleRepository implements VehicleRepository {
       final raw = payload['vehiculo'] ?? payload;
       if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);
       return null;
-    } on AppException {
-      return null;
+    } on AppException catch (error) {
+      if (error.code == 'http_404') return null;
+      rethrow;
     }
   }
 
   @override
   Future<List<PickupPoint>> fetchPickupPoints(String city) async {
-    await Future<void>.delayed(Duration.zero);
-    return MockData.pickupPoints.where((point) => point.city == city).toList();
+    final payload = await _api.get(
+      ApiEndpoints.pickupPoints,
+      query: city.trim().isEmpty ? null : {'ciudad': city.trim()},
+    );
+    final raw = payload['puntos'] ?? payload['data'];
+    if (raw is! List) {
+      throw const AppException(
+        'Los puntos autorizados no devolvieron datos válidos.',
+        code: 'invalid_points',
+      );
+    }
+    return raw.map((value) {
+      if (value is! Map<String, dynamic>) {
+        throw const AppException(
+          'Punto autorizado inválido.',
+          code: 'invalid_points',
+        );
+      }
+      final id = value['idPunto'];
+      final name = value['nombre'];
+      final address = value['direccion'];
+      final latitude = double.tryParse('${value['latitud']}');
+      final longitude = double.tryParse('${value['longitud']}');
+      if (id is! int ||
+          name is! String ||
+          address is! String ||
+          latitude == null ||
+          longitude == null) {
+        throw const AppException(
+          'Punto autorizado inválido.',
+          code: 'invalid_points',
+        );
+      }
+      return PickupPoint(
+        id: '$id',
+        name: name,
+        city: value['ciudad'] is String ? value['ciudad'] as String : '',
+        address: address,
+        latitude: latitude,
+        longitude: longitude,
+        distance: 0,
+        hasDeliveryDetails:
+            false, // El esquema no guarda distancia ni tarifa de entrega.
+      );
+    }).toList();
   }
 
   @override
@@ -230,22 +280,39 @@ class ApiVehicleRepository implements VehicleRepository {
 
   @override
   Future<Vehicle> publishVehicle(VehicleDraft draft) async {
+    if (draft.idPuntoRecogida == null ||
+        draft.idPuntoEntrega == null ||
+        draft.fotos.isEmpty ||
+        draft.tarjetaPropiedad == null ||
+        draft.tarjetaPropiedad!.isEmpty) {
+      throw const AppException(
+        'Para registrar un vehículo real debes seleccionar puntos autorizados y adjuntar fotos y tarjeta de propiedad válidas.',
+        code: 'vehicle_documents_required',
+      );
+    }
+    final token = _requireToken();
     final payload = await _api.post(
       ApiEndpoints.vehicles,
-      token: _requireToken(),
-      body: {
-        ...draft.toApiJson(),
-        'idPuntoRecogida': 1,
-        'idPuntoEntrega': 1,
-        'fotos': ['https://carman.app/vehiculos/pendiente.jpg'],
-        'tarjetaPropiedad': 'https://carman.app/documentos/pendiente.pdf',
-      },
+      token: token,
+      body: draft.toApiJson(),
     );
-    final raw = payload['vehiculo'] ?? payload;
-    if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);
+    final id = payload['idVehiculo'];
+    if (id is! int || id < 1) {
+      throw const AppException(
+        'La respuesta del registro no confirmó el vehículo. Comprueba Mis vehículos antes de reintentar.',
+        code: 'vehicle_creation_unconfirmed',
+      );
+    }
+    try {
+      final detail = await _api.get(ApiEndpoints.vehicle(id), token: token);
+      final raw = detail['vehiculo'] ?? detail;
+      if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);
+    } on AppException {
+      // La inserción ya ocurrió; no reintentar automáticamente.
+    }
     throw const AppException(
-      'El vehículo se creó, pero la respuesta no pudo interpretarse.',
-      code: 'invalid_vehicle',
+      'El vehículo se registró, pero no se pudo consultar. Revisa Mis vehículos antes de reintentar.',
+      code: 'vehicle_created_detail_unavailable',
     );
   }
 }

@@ -19,7 +19,10 @@ import { VerificationService } from '../src/auth/verification.service';
 describe('API con dependencias externas simuladas (e2e)', () => {
   let app: INestApplication;
   const pool = { query: jest.fn().mockImplementation(async (sql: string) => [
-    sql.includes('punto_autorizado') ? [{ idPunto: 1, ciudad: 'Bogotá' }] : [{ ok: 1 }],
+    sql.includes('punto_autorizado')
+      ? [{ idPunto: 1, nombre: 'Punto de prueba', ciudad: null,
+        direccion: 'Calle de prueba', latitud: '4.600000', longitud: '-74.100000' }]
+      : [{ ok: 1 }],
   ]) };
   const auth = {
     verificarToken: jest.fn().mockResolvedValue({ uid: 'firebase-uid' }),
@@ -79,7 +82,15 @@ describe('API con dependencias externas simuladas (e2e)', () => {
     expect(disallowed.headers['access-control-allow-origin']).toBeUndefined();
     expect(pool.query).toHaveBeenCalledWith('SELECT 1');
     await request(app.getHttpServer()).get('/puntos-autorizados')
-      .expect(200, [{ idPunto: 1, ciudad: 'Bogotá' }]);
+      .expect(200, [{ idPunto: 1, nombre: 'Punto de prueba', ciudad: null,
+        direccion: 'Calle de prueba', latitud: '4.600000', longitud: '-74.100000' }]);
+    await request(app.getHttpServer()).get('/puntos-autorizados?ciudad=Prueba')
+      .expect(200);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining('AND ciudad = ?'), ['Prueba'],
+    );
+    await request(app.getHttpServer()).get(`/puntos-autorizados?ciudad=${'a'.repeat(51)}`)
+      .expect(400);
   });
 
   it('acepta login y exige token Firebase para el perfil', async () => {

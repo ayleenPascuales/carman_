@@ -61,6 +61,7 @@ class RegistrationRequest {
     this.licenseNumber,
     this.licenseExpiry,
     this.licenseType = 'B',
+    this.licensePhotoUrl,
   });
 
   final String firstName;
@@ -75,6 +76,7 @@ class RegistrationRequest {
   final String? licenseNumber;
   final DateTime? licenseExpiry;
   final String licenseType;
+  final String? licensePhotoUrl;
 }
 
 abstract interface class AuthRepository {
@@ -292,7 +294,7 @@ class ApiAuthRepository implements AuthRepository {
       await _api.get(ApiEndpoints.verification, token: token),
     );
     final profile = await _api.get(ApiEndpoints.profile, token: token);
-    final user = _mapProfile(profile, email);
+    final user = _mapProfile(profile, email, status);
     if (status.activated) {
       if (remember) await _store.saveUser(user);
       await _store.saveToken(token);
@@ -314,6 +316,29 @@ class ApiAuthRepository implements AuthRepository {
 
   @override
   Future<AuthSession> register(RegistrationRequest request) async {
+    if (request.role == UserRole.owner) {
+      throw const AppException(
+        'Para registrarte como propietario necesitas añadir un vehículo con puntos y documentos reales. Este formulario aún no lo permite.',
+        code: 'owner_registration_unavailable',
+      );
+    }
+    if (request.role == UserRole.driver &&
+        (request.licenseNumber == null || request.licenseExpiry == null)) {
+      throw const AppException(
+        'Para registrarte como conductor necesitas una licencia vigente.',
+        code: 'license_required',
+      );
+    }
+    if ((request.licenseNumber != null || request.licenseExpiry != null) &&
+        (request.licenseNumber == null ||
+            request.licenseExpiry == null ||
+            request.licensePhotoUrl == null ||
+            request.licensePhotoUrl!.isEmpty)) {
+      throw const AppException(
+        'La licencia necesita una foto real alojada de forma segura antes de registrarla.',
+        code: 'license_document_required',
+      );
+    }
     final payload = {
       'persona': {
         'documento': request.document,
@@ -325,8 +350,6 @@ class ApiAuthRepository implements AuthRepository {
         'telefono': request.phone,
         'fechaNacimiento': request.birthDate.toIso8601String().substring(0, 10),
         'ciudad': request.city,
-        'direccion': 'Por completar',
-        'fotoPerfil': 'https://carman.app/avatar/default.png',
       },
       'roles': request.role.label,
       if (request.licenseNumber != null && request.licenseExpiry != null)
@@ -337,7 +360,7 @@ class ApiAuthRepository implements AuthRepository {
             10,
           ),
           'tipoLicencia': request.licenseType,
-          'fotoLicencia': 'https://carman.app/licencias/pendiente.jpg',
+          'fotoLicencia': request.licensePhotoUrl,
         },
     };
     final delivery = await _api.post(
@@ -416,7 +439,11 @@ class ApiAuthRepository implements AuthRepository {
     await _store.clearSession();
   }
 
-  UserProfile _mapProfile(Map<String, dynamic> json, String email) {
+  UserProfile _mapProfile(
+    Map<String, dynamic> json,
+    String email,
+    VerificationStatus status,
+  ) {
     final roles = <UserRole>{};
     final rawRoles = json['roles'];
     if (rawRoles is Map<String, dynamic>) {
@@ -427,8 +454,6 @@ class ApiAuthRepository implements AuthRepository {
         roles.add(UserRole.admin);
       }
     }
-    if (roles.isEmpty) roles.add(UserRole.client);
-
     final rawName = '${json['nombre'] ?? json['firstName'] ?? 'Usuario'}';
     final rawLast = '${json['apellido'] ?? json['lastName'] ?? ''}';
     return UserProfile(
@@ -437,17 +462,17 @@ class ApiAuthRepository implements AuthRepository {
       lastName: rawLast,
       email: '${json['email'] ?? email}',
       phone: '${json['telefono'] ?? json['phone'] ?? ''}',
-      city: '${json['ciudad'] ?? json['city'] ?? 'Cartagena'}',
+      city: '${json['ciudad'] ?? json['city'] ?? ''}',
       document: '${json['documento'] ?? json['document'] ?? ''}',
-      avatarUrl: json['fotoPerfil'] as String?,
+      avatarUrl: (json['fotoPerfil'] as String?)?.isNotEmpty == true
+          ? json['fotoPerfil'] as String
+          : null,
       roles: roles,
-      // The profile endpoint does not expose licence state yet; treat existing
-      // driver/owner accounts as verified and clients as not submitted.
-      licenseStatus:
-          roles.contains(UserRole.driver) || roles.contains(UserRole.owner)
-          ? LicenseStatus.approved
-          : LicenseStatus.notSubmitted,
+      licenseStatus: LicenseStatus.fromApi(json['licenciaEstado']),
+      isEmailVerified: status.emailVerified,
+      isPhoneVerified: status.phoneVerified,
       memberSince: DateTime.tryParse('${json['fechaHoraRegistro'] ?? ''}'),
+      rating: 0, // persona no expone puntuación; no usar la nota del modo demo.
       tripCount: 0,
     );
   }
