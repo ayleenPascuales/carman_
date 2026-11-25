@@ -1,6 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
-import type { Pool } from 'mysql2/promise';
-import type { ResultSetHeader, RowDataPacket } from 'mysql2';
+import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { CrearVehiculoDto } from './dto/crearVehiculo.dto';
 import { ActualizarVehiculoDto } from './dto/actualizarVehiculo.dto';
 import { CambiarEstadoVehiculoDTO } from './dto/cambiarEstadoVehiculo.dto';
@@ -44,6 +43,7 @@ export class VehiculosService {
             if (vehiculos.length > 0) {
                 throw new BadRequestException('Ya existe un vehículo registrado con esta placa.');
             }
+
 
             const [puntoRecogida] = await connection.execute<RowDataPacket[]>(
                 `SELECT idPunto FROM punto_autorizado WHERE idPunto = ? 
@@ -156,7 +156,7 @@ export class VehiculosService {
         if (dto.idPuntoRecogida !== undefined) {
             const [punto] = await this.database.query<RowDataPacket[]>(
                 `SELECT idPunto FROM punto_autorizado 
-                WHERE idPunto = ? AND activo = 1`, [dto.idPuntoRecogida]
+                WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoRecogida]
             );
             if (punto.length === 0) {
                 throw new NotFoundException('El punto de recogida no existe o esta inactivo. ');
@@ -171,6 +171,7 @@ export class VehiculosService {
                 throw new NotFoundException(
                     'EL punto de entrega no existe o esta inactivo. '
                 )
+
             }
         }
 

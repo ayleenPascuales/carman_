@@ -1,39 +1,41 @@
+<<<<<<< HEAD
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createPool } from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+=======
+import { Inject, Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
+import { createPool, type Pool } from 'mysql2/promise';
+import { databaseOptions } from './database.config';
+
+@Injectable()
+class DatabaseLifecycle implements OnApplicationShutdown {
+  constructor(@Inject('DATABASE_CONNECTION') private readonly database: Pool) {}
+
+  async onApplicationShutdown() {
+    await this.database.end();
+  }
+}
+>>>>>>> ae87ce29ae5976844860442f2463c9a85d16c754
 
 @Module({
     providers: [
         {
             provide: 'DATABASE_CONNECTION',
-            inject: [ConfigService],
-            useFactory: async (configService: ConfigService) => {
-                const ca = readFileSync(join(process.cwd(), 'certs', 'isrgrootx1.pem'));
-
-                const pool = createPool({
-                    host: configService.get<string>('DB_HOST'),
-                    port: Number(configService.get<string>('DB_PORT')),
-                    user: configService.get<string>('DB_USER'),
-                    password: configService.get<string>('DB_PASSWORD'),
-                    database: configService.get<string>('DB_NAME'),
-                    ssl: { ca, },
-                    waitForConnections: true,
-                    connectionLimit: 10,
-                    queueLimit: 0,
-                });
-                const connection = await pool.getConnection();
+            useFactory: async () => {
+                const pool = createPool(databaseOptions(process.env));
                 try {
-                    await connection.query('SELECT 1');
-                    console.log('Conexion con TiDB establecida correctamente');
-                } finally {
-                    connection.release();
+                    await pool.query('SELECT 1');
+                } catch (error) {
+                    await pool.end();
+                    throw error;
                 }
                 return pool;
             },
         },
+        DatabaseLifecycle,
     ],
     exports: ['DATABASE_CONNECTION'],
 })

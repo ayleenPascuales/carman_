@@ -6,6 +6,7 @@ import { CrearLicenciaDto } from './dto/crearLicencia.dto';
 import { AuthGuard } from '../auth/auth.guard';
 import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
 import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
+import { AllowUnverified } from '../auth/allow-unverified.decorator';
 
 
 @Controller('personas')
@@ -38,6 +39,7 @@ export class PersonasController {
     }
 
     @UseGuards(AuthGuard)
+    @AllowUnverified()
     @Get('perfil')
     obtenerPerfil(@Req() request: any) {
         return this.personasService.obtenerPerfil(request.user.idPersona);
