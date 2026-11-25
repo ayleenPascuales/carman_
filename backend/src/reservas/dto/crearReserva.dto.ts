@@ -1,4 +1,4 @@
-import { IsDateString, IsIn } from "class-validator";
+import { IsBoolean, IsDateString, IsIn, IsOptional } from "class-validator";
 
 export class CrearReservaDto {
 
@@ -13,5 +13,9 @@ export class CrearReservaDto {
 
     @IsIn(['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM'])
     horaFinServicio: string;
+
+    @IsOptional()
+    @IsBoolean()
+    solicitarConductor?: boolean;
 
 }

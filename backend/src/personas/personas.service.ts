@@ -717,26 +717,71 @@ export class PersonasService {
         }
     }
 
-    async actualizarDisponibilidadConductor(idPersona: number, dto: ActualizarConductorDto) {
+
+    async actualizarDisponibilidadConductor(
+        idPersona: number,
+        dto: ActualizarConductorDto
+    ) {
         const connection = await this.database.getConnection();
+        let debeBuscarConductores = false;
 
         try {
+            await connection.beginTransaction();
+
             const [conductores] = await connection.execute<RowDataPacket[]>(
-                `SELECT idPersona FROM conductor WHERE idPersona = ?`, [idPersona]
+                `SELECT idConductor FROM conductor WHERE idPersona = ?
+                FOR UPDATE`, [idPersona]
             );
+
             if (conductores.length === 0) {
-                throw new NotFoundException('Esta persona no tiene registrado el rol de conductor. ');
+                throw new NotFoundException(
+                    'Esta persona no tiene registrado el rol de conductor.'
+                );
+            }
+
+            const [licencias] = await connection.execute<RowDataPacket[]>(
+                `SELECT idLicencia FROM licencia WHERE idPersona = ?
+                AND estado = 'Vigente' AND fechaExpiracion >= CURDATE()
+                LIMIT 1`, [idPersona]
+            );
+
+            if (Number(dto.disponibilidad) === 1 && licencias.length === 0) {
+                throw new BadRequestException(
+                    'No puedes activar tu disponibilidad porque no tienes una licencia vigente.'
+                );
             }
             await connection.execute(
-                `UPDATE conductor SET disponibilidad = ? WHERE idPersona = ?`, [dto.disponibilidad, idPersona]
+                `UPDATE conductor SET disponibilidad = ? WHERE idPersona = ?`,
+                [dto.disponibilidad, idPersona]
             );
-            return {
-                mensaje: 'Disponibilidad actualizada correctamente. ',
-                idPersona,
-                disponibilidad: dto.disponibilidad
-            };
+
+            await connection.commit();
+            debeBuscarConductores = Number(dto.disponibilidad) === 1;
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
         } finally {
             connection.release();
         }
+
+        const reservasAsignadas: number[] = [];
+
+        if (debeBuscarConductores) {
+            const resultado = await this.reservasService.buscarYasignarConductor();
+
+            reservasAsignadas.push(
+                ...resultado.reservasAsignadas.map(
+                    reserva => reserva.idReserva
+                )
+            );
+        }
+
+        return {
+            mensaje: 'Disponibilidad actualizada correctamente.',
+            idPersona,
+            disponibilidad: dto.disponibilidad,
+            reservasAsignadas
+        };
     }
 }
