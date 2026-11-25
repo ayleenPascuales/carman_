@@ -12,20 +12,8 @@
     "api": {
       "root": "backend",
       "framework": "nestjs",
-      "routes": [
-        {
-          "src": "/api/(.*)",
-          "transforms": [
-            { "type": "request.path", "op": "set", "args": "/$1" }
-          ]
-        },
-        {
-          "src": "/api",
-          "transforms": [
-            { "type": "request.path", "op": "set", "args": "/" }
-          ]
-        }
-      ]
+      "entrypoint": "src/main.ts",
+      "outputDirectory": "."
     }
   },
   "rewrites": [

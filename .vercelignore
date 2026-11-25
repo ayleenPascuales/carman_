@@ -1,0 +1,32 @@
+# Local credentials must never be uploaded by Vercel CLI.
+.env
+.env.*
+**/.env
+**/.env.*
+**/*serviceAccount*.json
+**/*service-account*.json
+
+# Generated files and platforms not used by Flutter Web.
+**/node_modules
+backend/dist
+backend/coverage
+backend/tsconfig.build.tsbuildinfo
+frontend/.dart_tool
+frontend/.flutter-plugins-dependencies
+frontend/.idea
+frontend/*.iml
+frontend/.metadata
+frontend/build
+frontend/coverage
+frontend/android
+frontend/ios
+frontend/linux
+frontend/macos
+frontend/windows
+
+# Documentation and tests are not needed at build/runtime.
+docs
+infrastructure
+frontend/docs
+frontend/test
+backend/test

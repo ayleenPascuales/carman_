@@ -48,10 +48,12 @@ describe('Arranque real del grafo Nest en Vercel (servicios externos simulados)'
   });
 
   it('inicializa todos los módulos sin archivos locales ni cron en memoria', async () => {
-    await request(app.getHttpServer()).get('/health').expect(200, {
+    await request(app.getHttpServer()).get('/api/health').expect(200, {
       status: 'ok',
       database: 'ok',
     });
+    await request(app.getHttpServer()).get('/health').expect(404);
+    await request(app.getHttpServer()).get('/api/internal/inactive-accounts').expect(403);
     expect(pool.query).toHaveBeenCalledWith('SELECT 1');
   });
 });
