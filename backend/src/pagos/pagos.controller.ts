@@ -1,4 +1,4 @@
-import { Controller, Post, Param, ParseIntPipe, UseGuards, Req, Body, Get, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Param, ParseIntPipe, UseGuards, Req, Body, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { PagosService } from './pagos.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { WompiService } from './wompi.service';
@@ -8,14 +8,6 @@ interface SolicitudAutenticada {
     user: {
         idPersona: number;
     };
-}
-
-interface CrearNequiDTO {
-    monto: number;
-    correo: string;
-    celular: string;
-    acceptanceToken: string;
-    personalDataToken: string;
 }
 
 @Controller('pagos')
@@ -34,25 +26,6 @@ export class PagosController {
     @Post('ordenes/:idOrdenPago/checkout')
     iniciarCheckout(@Req() request: SolicitudAutenticada, @Param('idOrdenPago', ParseIntPipe) idOrdenPago: number,) {
         return this.pagosService.iniciarPago(request.user.idPersona, idOrdenPago,);
-    }
-
-    @UseGuards(AuthGuard)
-    @Post('wompi/tokens')
-    obtenerTokensWompi() {
-        return this.wompiService.obtenerTokensAceptacion();
-    }
-
-    @UseGuards(AuthGuard)
-    @Post('wompi/bancos-pse')
-    obtenerBancosPSE() {
-        return this.wompiService.obtenerBancosPSE();
-    }
-
-    @UseGuards(AuthGuard)
-    @Post('wompi/nequi')
-    crearPagoNequi(@Body() datos: CrearNequiDTO) {
-        console.log('DATOS RECIBIDOS:', datos);
-        return this.wompiService.crearTransaccionNequi(datos);
     }
 
     @HttpCode(HttpStatus.OK)

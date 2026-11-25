@@ -8,6 +8,7 @@ import { AuthService } from '../auth/auth.service';
 import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
 import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
 import { DeliveryError, VerificationService } from '../auth/verification.service';
+import { ReservasService } from '../reservas/reservas.service';
 
 @Injectable()
 export class PersonasService {
@@ -17,6 +18,7 @@ export class PersonasService {
         private readonly database: Pool,
         private readonly authService: AuthService,
         private readonly verification: VerificationService,
+        private readonly reservasService: ReservasService,
     ) { }
 
     async registroInicial(dto: RegistroInicialDto) {
@@ -221,9 +223,8 @@ export class PersonasService {
                 );
                 correoEnviado = true;
             } catch (error) {
-                this.logger.warn(`No se pudo enviar el correo de activación: ${
-                    error instanceof DeliveryError ? error.diagnostic : 'ERROR_DESCONOCIDO'
-                }`);
+                this.logger.warn(`No se pudo enviar el correo de activación: ${error instanceof DeliveryError ? error.diagnostic : 'ERROR_DESCONOCIDO'
+                    }`);
             }
             return {
                 mensaje: 'Cuenta creada. Activa tu correo y solicita el SMS para verificar el teléfono.',
@@ -284,7 +285,6 @@ export class PersonasService {
                 throw new ConflictException('El usuario ya tiene registrado el rol de conductor. ');
             }
             const [licencias] = await connection.execute<RowDataPacket[]>(
-<<<<<<< HEAD
                 `SELECT 
             idLicencia,
             numeroDocumento, 
@@ -292,16 +292,9 @@ export class PersonasService {
             DATE_FORMAT(fechaExpiracion, '%Y-%m-%d') AS fechaExpiracion
             FROM licencia WHERE idPersona = ? LIMIT 1 FOR UPDATE`, [idPersona]
             );
-=======
-                `SELECT idLicencia, numeroDocumento, estado,
-                fechaExpiracion >= CURDATE() AS licencia_vigente
-                FROM  licencia WHERE idPersona = ? LIMIT 1 FOR UPDATE`, [idPersona],);
-
->>>>>>> ae87ce29ae5976844860442f2463c9a85d16c754
             const licenciaExistente = licencias[0];
             let licenciaVigente = false;
             if (licenciaExistente) {
-<<<<<<< HEAD
                 const fechaExpiracion = new Date(
                     `${licenciaExistente.fechaExpiracion}T00:00:00`
                 );
@@ -315,10 +308,7 @@ export class PersonasService {
                         'Tu licencia esta suspendida. Contacta con la administracion de CARMAN.'
                     );
                 }
-=======
-                licenciaVigente = licenciaExistente.estado === 'Vigente'
-                    && Number(licenciaExistente.licencia_vigente) === 1;
->>>>>>> ae87ce29ae5976844860442f2463c9a85d16c754
+
             }
             if (!licenciaVigente && !dto.licencia) {
                 throw new BadRequestException(

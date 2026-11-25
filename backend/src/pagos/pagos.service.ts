@@ -3,7 +3,6 @@ import type { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ArchivosService } from '../archivos/archivos.service';
 import PDFDocument from 'pdfkit';
 import { WompiService } from './wompi.service';
-import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type { EventoWompi } from './wompi.service';
 
@@ -25,6 +24,13 @@ interface OrdenCheckout extends RowDataPacket {
     idReserva: number;
     total: number | string;
     estado: string;
+    estadoReserva: string;
+    fechaInicioServicio: string | Date;
+    horaInicioServicio: string;
+    fechaFinServicio: string | Date;
+    horaFinServicio: string;
+    antesInicioServicio: number;
+    duranteReserva: number;
 }
 
 interface PagoWebhook extends RowDataPacket {
@@ -34,6 +40,7 @@ interface PagoWebhook extends RowDataPacket {
     estado: string;
     idTransaccionWompi: string | null;
     estadoOrden: string;
+    tipoPago: string;
 }
 
 interface PagoExistente extends RowDataPacket {
@@ -41,8 +48,8 @@ interface PagoExistente extends RowDataPacket {
     idOrdenPago: number;
     monto: number | string;
     estado: string;
-    tipoPago: string;
     referenciaWompi: string | null;
+    tipoPago: string;
 }
 
 @Injectable()
@@ -51,8 +58,7 @@ export class PagosService {
         @Inject('DATABASE_CONNECTION')
         private readonly db: Pool,
         private readonly archivosService: ArchivosService,
-        private readonly wompiService: WompiService,
-        private readonly configService: ConfigService) { }
+        private readonly wompiService: WompiService,) { }
 
 
     async generarOrdenPago(idPersona: number, idReserva: number) {
@@ -89,6 +95,10 @@ export class PagosService {
 
             if (ordenes.length > 0) {
                 const orden = ordenes[0];
+
+                if (orden.estado === 'Anulada') {
+                    throw new BadRequestException('La orden de pago de esta reserva fue anulada.')
+                }
 
                 await conexion.commit();
                 transaccionActiva = false;
@@ -238,7 +248,16 @@ export class PagosService {
             transaccionActiva = true;
 
             const [ordenes] = await conexion.query<OrdenCheckout[]>(
-                `SELECT op.idOrdenPago, op.idReserva, op.total, op.estado
+                `SELECT op.idOrdenPago, op.idReserva, op.total, 
+                op.estado, r.estado AS estadoReserva, r.fechaInicioServicio,
+                r.horaInicioServicio, r.fechaFinServicio, r.horaFinServicio,
+                (CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '-05:00') 
+                < TIMESTAMP(r.fechaInicioServicio, r.horaInicioServicio))
+                AS antesInicioServicio,
+                (CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '-05:00') BETWEEN 
+                TIMESTAMP(r.fechaInicioServicio, r.horaInicioServicio)
+                AND TIMESTAMP(r.fechaFinServicio, r.horaFinServicio))
+                AS duranteReserva
              FROM orden_de_pago op
              INNER JOIN reserva r ON op.idReserva = r.idReserva
              INNER JOIN cliente c ON r.idCliente = c.idCliente
@@ -260,29 +279,90 @@ export class PagosService {
             }
 
             const total = Number(orden.total);
-            const montoAnticipo = Math.round(total * 50) / 100;
 
-            if (
-                !Number.isFinite(total) ||
-                total <= 0 ||
-                montoAnticipo <= 0
-            ) {
+            if (!Number.isFinite(total) || total <= 0) {
                 throw new BadRequestException(
                     'El monto de la orden no es válido.',
                 );
             }
 
+            const montoAnticipo = Math.round(total * 50) / 100;
+
+            const [pagosRealizados] = await conexion.query<
+                (RowDataPacket & { totalAprobado: number | string | null })[]
+            >(
+                `SELECT SUM(monto) AS totalAprobado FROM pago
+                WHERE idOrdenPago = ? AND estado = 'Aprobado'`,
+                [idOrdenPago],
+            );
+
+            const totalAprobado = Number(pagosRealizados[0].totalAprobado ?? 0);
+            const montoRestante = Math.max(0, total - totalAprobado);
+            if (montoRestante <= 0) {
+                throw new BadRequestException(
+                    'Esta orden de pago ya está completamente pagada.'
+                )
+            }
+
+
+            let tipoPago: 'Anticipo' | 'Restante';
+            let montoPago: number;
+
+            if (orden.antesInicioServicio) {
+                tipoPago = 'Anticipo';
+                montoPago = Math.min(montoAnticipo, montoRestante);
+            } else if (orden.duranteReserva) {
+                tipoPago = 'Restante';
+                montoPago = montoRestante;
+            } else {
+                throw new BadRequestException(
+                    'El periodo permitido para realizar pagos ha finalizado.',
+                );
+            }
+            if (
+                orden.estadoReserva !== 'Confirmada' &&
+                orden.estadoReserva !== 'EnCurso'
+            ) {
+                throw new BadRequestException(
+                    'La reserva no está en un estado válido para realizar pagos.',
+                );
+            }
+
+            const [anticiposAprobados] = await conexion.query<PagoExistente[]>(
+                `SELECT idPago, idOrdenPago, monto, estado,
+                tipoPago, referenciaWompi FROM pago
+                WHERE idOrdenPago = ? AND tipoPago = 'Anticipo'
+                AND estado = 'Aprobado' LIMIT 1 FOR UPDATE`,
+                [idOrdenPago],
+            );
+
+            if (tipoPago === 'Restante' && anticiposAprobados.length === 0) {
+                throw new BadRequestException(
+                    'Primero debes tener el anticipo aprobado antes de pagar el restante.',
+                );
+            }
+
+            const [pagosAprobados] = await conexion.query<PagoExistente[]>(
+                `SELECT idPago, idOrdenPago, monto, estado,
+                tipoPago, referenciaWompi FROM pago
+                WHERE idOrdenPago = ? AND tipoPago = ?
+                AND estado = 'Aprobado' LIMIT 1 FOR UPDATE`,
+                [idOrdenPago, tipoPago],
+            );
+
+            if (pagosAprobados.length > 0) {
+                throw new BadRequestException(
+                    `El pago correspondiente al ${tipoPago.toLowerCase()} ya fue aprobado.`,
+                );
+            }
+
             const [pagosPendientes] = await conexion.query<PagoExistente[]>(
                 `SELECT idPago, idOrdenPago, monto, estado,
-                    tipoPago, referenciaWompi
-             FROM pago
-             WHERE idOrdenPago = ?
-               AND tipoPago = 'Anticipo'
-               AND estado IN ('Pendiente', 'En_proceso')
-             ORDER BY idPago DESC
-             LIMIT 1
-             FOR UPDATE`,
-                [idOrdenPago],
+                tipoPago, referenciaWompi
+                FROM pago WHERE idOrdenPago = ?
+                AND tipoPago = ? AND estado IN ('Pendiente', 'En_proceso')
+                ORDER BY idPago DESC LIMIT 1 FOR UPDATE`,
+                [idOrdenPago, tipoPago],
             );
 
             let referencia: string;
@@ -296,33 +376,18 @@ export class PagosService {
                     );
                 }
 
-                if (Math.round(Number(pagoExistente.monto) * 100) !==
-                    Math.round(montoAnticipo * 100)) {
+                if (
+                    Math.round(Number(pagoExistente.monto) * 100) !==
+                    Math.round(montoPago * 100)
+                ) {
                     throw new BadRequestException(
-                        'El monto del anticipo pendiente no coincide con la orden.',
+                        'El monto del pago pendiente no coincide con la orden.',
                     );
                 }
 
                 referencia = pagoExistente.referenciaWompi;
 
             } else {
-                const [pagosAprobados] = await conexion.query<PagoExistente[]>(
-                    `SELECT idPago, idOrdenPago, monto, estado,
-                        tipoPago, referenciaWompi
-                 FROM pago
-                 WHERE idOrdenPago = ?
-                   AND tipoPago = 'Anticipo'
-                   AND estado = 'Aprobado'
-                 LIMIT 1
-                 FOR UPDATE`,
-                    [idOrdenPago],
-                );
-
-                if (pagosAprobados.length > 0) {
-                    throw new BadRequestException(
-                        'El anticipo de esta orden ya fue aprobado.',
-                    );
-                }
                 referencia = `CARMAN-${idOrdenPago}-${randomUUID()}`;
 
                 await conexion.execute(
@@ -335,12 +400,13 @@ export class PagosService {
                     estado,
                     tipoPago,
                     referenciaWompi
-                ) VALUES (?, ?, NULL, ?, ?, 'Pendiente', 'Anticipo', ?)`,
+                    ) VALUES (?, ?, NULL, ?, ?, 'Pendiente', ?, ?)`,
                     [
                         orden.idReserva,
                         orden.idOrdenPago,
-                        montoAnticipo,
+                        montoPago,
                         referencia,
+                        tipoPago,
                         referencia,
                     ],
                 );
@@ -348,20 +414,9 @@ export class PagosService {
 
             await conexion.commit();
             transaccionActiva = false;
-            const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-
-            if (!frontendUrl) {
-                throw new BadRequestException(
-                    'No está configurada la dirección del frontend.',
-                );
-            }
-
-            const redirectUrl = `${frontendUrl}/pagos/retorno`;
-
             const checkout = await this.wompiService.crearCheckout(
-                montoAnticipo,
+                montoPago,
                 referencia,
-                redirectUrl,
             );
 
             return {
@@ -369,8 +424,8 @@ export class PagosService {
                 pago: {
                     idOrdenPago: orden.idOrdenPago,
                     idReserva: orden.idReserva,
-                    monto: montoAnticipo,
-                    tipoPago: 'Anticipo',
+                    monto: montoPago,
+                    tipoPago,
                     estado: 'Pendiente',
                     referencia,
                 },
@@ -431,7 +486,7 @@ export class PagosService {
             !transaccion?.reference ||
             !transaccion.id ||
             transaccion.currency !== 'COP' ||
-            !Number.isFinite(transaccion.amount_in_cents)
+            !Number.isInteger(transaccion.amount_in_cents) || transaccion.amount_in_cents <= 0
         ) {
             throw new BadRequestException('Datos de transacción inválidos.');
         }
@@ -451,9 +506,11 @@ export class PagosService {
         }
 
         const conexion = await this.db.getConnection();
+        let transaccionActiva = false;
 
         try {
             await conexion.beginTransaction();
+            transaccionActiva = true;
 
             const [pagos] = await conexion.query<PagoWebhook[]>(
                 `SELECT
@@ -462,6 +519,7 @@ export class PagosService {
                 p.monto,
                 p.estado,
                 p.idTransaccionWompi,
+                p.tipoPago,
                 op.estado AS estadoOrden
                 FROM pago p INNER JOIN orden_de_pago op
                 ON p.idOrdenPago = op.idOrdenPago
@@ -473,7 +531,6 @@ export class PagosService {
             }
 
             const pago = pagos[0];
-
             const montoEsperado = Math.round(Number(pago.monto) * 100);
 
             if (montoEsperado !== transaccion.amount_in_cents) {
@@ -495,6 +552,7 @@ export class PagosService {
 
             if (estadosFinales.includes(pago.estado)) {
                 await conexion.commit();
+                transaccionActiva = false;
 
                 return {
                     mensaje: 'El pago ya tiene un estado final.',
@@ -505,6 +563,7 @@ export class PagosService {
             if (pago.estado === nuevoEstado &&
                 pago.idTransaccionWompi === transaccion.id) {
                 await conexion.commit();
+                transaccionActiva = false;
 
                 return {
                     mensaje: 'El evento ya había sido procesado.',
@@ -520,10 +579,11 @@ export class PagosService {
             );
             if (pago.estadoOrden === 'Anulada') {
                 await conexion.commit();
+                transaccionActiva = false;
 
                 return {
                     mensaje: nuevoEstado === 'Aprobado'
-                        ? 'El pago fue aprobado por Wompi, pero la orden está anulada. Se debe gestionar el reembolso.'
+                        ? 'El pago fue aprobado por Wompi, pero la orden está anulada. Requiere revision administrativa.'
                         : 'El evento fue registrado, pero la orden permanece anulada.',
                     estado: nuevoEstado,
                     estadoOrden: 'Anulada',
@@ -533,10 +593,8 @@ export class PagosService {
             const [ordenes] = await conexion.query<
                 (RowDataPacket & { total: number | string })[]
             >(
-                `SELECT total FROM orden_de_pago
-             WHERE idOrdenPago = ?
-             FOR UPDATE`,
-                [pago.idOrdenPago],
+                `SELECT total FROM orden_de_pago WHERE idOrdenPago = ?
+             FOR UPDATE`, [pago.idOrdenPago],
             );
 
             if (ordenes.length === 0) {
@@ -546,14 +604,25 @@ export class PagosService {
             const [sumas] = await conexion.query<
                 (RowDataPacket & { totalAprobado: number | string | null })[]
             >(
-                `SELECT SUM(monto) AS totalAprobado
-             FROM pago
+                `SELECT SUM(monto) AS totalAprobado FROM pago
              WHERE idOrdenPago = ? AND estado = 'Aprobado'`,
                 [pago.idOrdenPago],
             );
 
             const totalAprobado = Number(sumas[0].totalAprobado ?? 0);
             const totalOrden = Number(ordenes[0].total);
+
+            if (totalAprobado > totalOrden) {
+                await conexion.commit();
+                transaccionActiva = false;
+
+                return {
+                    mensaje: 'El pago fue aprobado por Wompi, pero el total de pagos supera la orden. Requiere revisión administrativa.',
+                    estado: nuevoEstado,
+                    estadoOrden: 'Activa',
+                    requiereRevision: true,
+                };
+            }
 
             if (totalAprobado >= totalOrden) {
                 await conexion.execute(
@@ -565,6 +634,7 @@ export class PagosService {
             }
 
             await conexion.commit();
+            transaccionActiva = false;
 
             return {
                 mensaje: 'Evento de Wompi procesado correctamente.',
@@ -572,7 +642,9 @@ export class PagosService {
             };
 
         } catch (error) {
-            await conexion.rollback();
+            if (transaccionActiva) {
+                await conexion.rollback();
+            }
             throw error;
         } finally {
             conexion.release();

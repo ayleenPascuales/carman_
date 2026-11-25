@@ -13,13 +13,11 @@ import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
-<<<<<<< HEAD
 import { ArchivosModule } from './archivos/archivos.module';
-=======
 import { validateEnv } from './config/validate-env';
 import { HealthModule } from './health/health.module';
 import { PuntosModule } from './puntos/puntos.module';
->>>>>>> ae87ce29ae5976844860442f2463c9a85d16c754
+
 
 @Module({
   imports: [

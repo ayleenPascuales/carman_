@@ -1,8 +1,8 @@
 
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { createHash, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 
 export interface EventoWompi {
     event: string;
@@ -51,56 +51,6 @@ export class WompiService {
         ) {
             throw new InternalServerErrorException(
                 'Faltan credenciales de configuración de Wompi.',
-            );
-        }
-    }
-
-    async obtenerTokensAceptacion() {
-        try {
-            const respuesta = await axios.get(
-                `${this.baseUrl}/merchants/info`,
-                {
-                    headers: {
-                        'x-merchant-public-key': this.publicKey,
-                    },
-                },
-            );
-
-            const datos = respuesta.data.data;
-
-            return {
-                acceptanceToken:
-                    datos.presigned_acceptance.acceptance_token,
-                acceptanceUrl:
-                    datos.presigned_acceptance.permalink,
-
-                personalDataToken:
-                    datos.presigned_personal_data_auth.acceptance_token,
-                personalDataUrl:
-                    datos.presigned_personal_data_auth.permalink,
-            };
-        } catch {
-            throw new InternalServerErrorException(
-                'No fue posible obtener los tokens de aceptación de Wompi.',
-            );
-        }
-    }
-
-    async obtenerBancosPSE() {
-        try {
-            const respuesta = await axios.get(
-                `${this.baseUrl}/pse/financial_institutions`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${this.publicKey}`,
-                    },
-                },
-            );
-
-            return respuesta.data.data;
-        } catch {
-            throw new InternalServerErrorException(
-                'No fue posible consultar los bancos disponibles en PSE.',
             );
         }
     }
@@ -170,7 +120,6 @@ export class WompiService {
     async crearCheckout(
         monto: number,
         referencia: string,
-        redirectUrl: string,
         cliente?: {
             correo?: string;
             nombreCompleto?: string;
@@ -178,11 +127,11 @@ export class WompiService {
         },
     ) {
         if (!Number.isFinite(monto) || monto <= 0) {
-            throw new Error('El monto del pago no es válido.');
+            throw new BadRequestException('El monto del pago no es válido.');
         }
 
-        if (!referencia || !redirectUrl) {
-            throw new Error('Faltan datos para generar el checkout.');
+        if (!referencia) {
+            throw new BadRequestException('Falta la referencia para generar el checkout.');
         }
 
         const montoEnCentavos = Math.round(monto * 100);
@@ -246,75 +195,5 @@ export class WompiService {
         }
     }
 
-    async crearTransaccionNequi(datos: {
-        monto: number;
-        correo: string;
-        celular: string;
-        acceptanceToken: string;
-        personalDataToken: string;
-    }) {
-        if (!Number.isFinite(datos.monto) || datos.monto <= 0) {
-            throw new Error('El monto del pago no es válido.');
-        }
-
-        if (!/^\d{10}$/.test(datos.celular)) {
-            throw new Error('El celular de Nequi debe tener 10 dígitos.');
-        }
-
-        if (!datos.correo || !datos.acceptanceToken || !datos.personalDataToken) {
-            throw new Error('Faltan datos de aceptación o del cliente.');
-        }
-
-        const montoEnCentavos = Math.round(datos.monto * 100);
-        const referencia = `CARMAN-${randomUUID()}`;
-
-        const firma = this.generarFirma(
-            referencia,
-            montoEnCentavos,
-        );
-
-        const cuerpo = {
-            acceptance_token: datos.acceptanceToken,
-            accept_personal_auth: datos.personalDataToken,
-            amount_in_cents: montoEnCentavos,
-            currency: 'COP',
-            customer_email: datos.correo,
-            reference: referencia,
-            signature: firma,
-            payment_method_type: 'NEQUI',
-            payment_method: {
-                type: 'NEQUI',
-                phone_number: datos.celular,
-            },
-        };
-
-        try {
-            const respuesta = await axios.post(
-                `${this.baseUrl}/transactions`,
-                cuerpo,
-                {
-                    headers: {
-                        Authorization: `Bearer ${this.privateKey}`,
-                        'Content-Type': 'application/json',
-                    },
-                },
-            );
-
-            return respuesta.data.data;
-        } catch (error) {
-            if (axios.isAxiosError(error)) {
-                console.error(
-                    'ERROR DE WOMPI:',
-                    JSON.stringify(error.response?.data, null, 2),
-                );
-            } else {
-                console.error('ERROR INTERNO:', error);
-            }
-
-            throw new InternalServerErrorException(
-                'No fue posible crear la transacción Nequi en Wompi.',
-            );
-        }
-    }
 
 }
