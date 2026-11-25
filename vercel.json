@@ -1,0 +1,32 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "frontend",
+      "buildCommand": "bash scripts/build-web.sh",
+      "outputDirectory": "build/web",
+      "rewrites": [
+        { "source": "/(.*)", "destination": "/index.html" }
+      ]
+    },
+    "api": {
+      "root": "backend",
+      "framework": "nestjs",
+      "entrypoint": "src/main.ts",
+      "outputDirectory": "."
+    }
+  },
+  "rewrites": [
+    { "source": "/api", "destination": { "service": "api" } },
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ],
+  "schedules": {
+    "inactive-accounts": {
+      "schedule": "0 2 * * *",
+      "timezone": "America/Bogota",
+      "path": "/api/internal/inactive-accounts",
+      "requestMethod": "GET"
+    }
+  }
+}

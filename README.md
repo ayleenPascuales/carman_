@@ -1,30 +1,71 @@
 # CARMAN
 
-Plataforma web y móvil para el alquiler de vehículos, con integración de inteligencia artificial.
+Plataforma web y móvil para el alquiler de vehículos entre particulares, con llave digital, verificación de conductores y reservas protegidas.
 
 ## Descripción
 
-CARMAN busca facilitar el alquiler de vehículos mediante una plataforma que conecte a los usuarios con los propietarios de vehículos, permitiendo consultar vehículos, gestionar reservas y acceder a funcionalidades inteligentes.
+Carman conecta a clientes, conductores y propietarios de vehículos. Permite explorar el catálogo, consultar disponibilidad, reservar, pagar, abrir el coche desde el móvil y gestionar viajes. El frontend está construido con Flutter (Android, iOS y web) sobre el design system de Carman.
 
 ## Tecnologías principales
 
-- **Frontend:** Flutter y Dart
+- **Frontend:** Flutter 3.50+, Dart 3.14+, Riverpod y GoRouter.
 - **Backend:** Node.js y NestJS.
-- **Base de datos:** PostgreSQL.
+- **Base de datos:** MySQL.
 - **Autenticación y servicios complementarios:** Firebase.
 - **Inteligencia artificial:** integración planificada.
 
 ## Estructura del proyecto
 
-- `backend/`: API y lógica del servidor.
-- `frontend/`: aplicación web y móvil.
+- `backend/`: API y lógica del servidor (NestJS).
+- `frontend/`: aplicación Flutter para web y móvil. **Incluye 29 pantallas funcionales, paneles de cliente, propietario, conductor y administración, diseño responsive para móvil/tablet/web y datos demo.**
 - `docs/`: documentación técnica.
 - `infrastructure/`: configuraciones de infraestructura y despliegue.
 
-## Equipo de desarrollo
+## Frontend
 
-Proyecto desarrollado de manera colaborativa.
+```bash
+cd frontend
+flutter pub get
+flutter run -d chrome
+```
+
+La aplicación arranca en modo demo, sin backend. Credenciales de prueba:
+
+- Correo: `alex.rivera@carman.es`
+- Contraseña: `Carman123`
+- Código SMS: `582301`
+
+Consulta la [documentación del frontend](frontend/readme.md) para arquitectura, flujo de pantallas, tests y guía de integración. El contrato JSON para backend está en [frontend/docs/api_contract.md](frontend/docs/api_contract.md).
+
+### Vista previa
+
+![Home de Carman](frontend/docs/screenshots/home.png)
+
+## Backend
+
+El backend ya implementa autenticación con Firebase, registro por roles, perfil y gestión de vehículos. Los módulos de reservas, pagos, notificaciones, rutas y calificaciones exponen controladores vacíos que deben completarse antes de conectar el frontend en modo API.
+
+```bash
+cd backend
+npm install
+npm run start:dev
+```
+
+`CARMAN_USE_LIVE_API=true` y `CARMAN_API_URL=http://localhost:3000` activan el consumo de la API real desde Flutter.
+
+## Despliegue web + API en un proyecto Vercel
+
+El [`vercel.json`](vercel.json) de la raíz usa [Vercel Services (beta)](https://vercel.com/docs/services): Flutter Web se compila como sitio estático y NestJS como función. Ambos comparten **un proyecto y un dominio**. En Vercel, `/` (incluidos enlaces directos como `/admin`) sirve Flutter, mientras `/api/health`, `/api/auth/...` y las demás rutas `/api/...` llegan a NestJS. Vercel Services conserva el prefijo `/api`; `backend/src/configure-app.ts` lo aplica solo en Vercel, sin cambiar las rutas de los controladores ni la API local.
+
+1. Antes de desplegar, rotar las credenciales TiDB y Firebase Admin que se compartieron anteriormente. Revisar el esquema de `carmandb` y la tabla OTP propuesta en `backend/migrations/002_phone_verification.sql`; **no ejecutar `db:migrate` sobre esa base existente**.
+2. Reutilizar el proyecto Vercel existente **`carman_app`**, con **Root Directory = raíz del repositorio** (no `backend` ni `frontend`); desde esta raíz se puede vincular con `vercel link --yes --scope proyecto-carman --project carman_app`. La CLI puede desplegar cambios locales sin `git push`. No sobrescribir los comandos de compilación ni las carpetas de salida definidas por servicio en `vercel.json`: en la API, `entrypoint` y `outputDirectory` mantienen las dependencias dentro de la función. El build web instala un Flutter 3.50.1 fijado y verificado, y activa `CARMAN_USE_LIVE_API=true`; puede tardar varios minutos. `.vercelignore` excluye los archivos `.env` locales antes de subir el código.
+3. En **Settings → Environment Variables**, configurar solo para el servidor `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_CA`, `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` (o `FIREBASE_SERVICE_ACCOUNT_JSON`), `TEXTBEE_API_KEY`, `SMS_OTP_SECRET`, `CRON_SECRET` y `CORS_ORIGINS=https://<dominio-del-proyecto>`. NestJS 12 necesita `NODE_OPTIONS=--experimental-require-module` en las funciones de Vercel. Revisar `backend/.env.example` y habilitar Production/Preview según corresponda. Guardar las claves en Vercel, **no en Git ni en `dart-define`**.
+4. Verificar `/`, `/admin`, un archivo real como `/main.dart.js`, `/api/health` y que `/api/internal/inactive-accounts` sin `CRON_SECRET` devuelva 403. Después, iniciar sesión con la cuenta de prueba existente (no registrarla de nuevo) y probar Firebase/textbee con sus proveedores configurados. `/api/health` solo comprueba conexión a TiDB: no confirma tablas, correo ni SMS.
+
+Si Vercel solo muestra `[BUILD_UTILS_SPAWN_128]`, revisar las líneas anteriores del log: `frontend/scripts/build-web.sh` indica la etapa que falló. No compartir contraseñas ni claves al pedir ayuda con el log.
+
+Flutter Web usa automáticamente el dominio actual más `/api`, tanto en producción como en previews. Android/iOS se compilan y distribuyen **por separado**: para conectarlos a este proyecto, usar `--dart-define=CARMAN_USE_LIVE_API=true --dart-define=CARMAN_API_URL=https://<dominio-del-proyecto>/api`. Vercel no ejecuta las apps nativas. Varias rutas de reservas, pagos y otros módulos **aún no están implementadas** en el backend; desplegar la web en modo API no hace funcionales esos flujos. Detalles de configuración y límites: [`backend/readme.md`](backend/readme.md).
 
 ## Estado
 
-En desarrollo.
+Frontend completo y navegable en modo demo. Backend en desarrollo: reservas, pagos y notificaciones pendientes. La integración en vivo está preparada a nivel de repositorios.
