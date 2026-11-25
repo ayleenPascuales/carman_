@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
-import type { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ArchivosService } from '../archivos/archivos.service';
 import PDFDocument from 'pdfkit';
 import { WompiService } from './wompi.service';
@@ -183,6 +183,45 @@ export class PagosService {
         }
     }
 
+    async prepararActualizacionOrdenPago(conexion: PoolConnection, idReserva: number, nuevoTotal: number,) {
+        if (!Number.isFinite(nuevoTotal) || nuevoTotal <= 0) {
+            throw new BadRequestException('El nuevo total de la orden no es válido. ');
+        }
+
+        const [ordenes] = await conexion.query<OrdenPago[]>(
+            `SELECT idOrdenPago, total, estado, rutaPdf
+            FROM orden_de_pago WHERE idReserva = ? FOR UPDATE`, [idReserva],
+        );
+        if (ordenes.length === 0) {
+            return null;
+        }
+        const orden = ordenes[0];
+        if (orden.estado !== 'Activa') {
+            throw new BadRequestException(
+                'No se puede editar una reserva cuya orden de pago no este activa.',
+            );
+        }
+
+        const [pagos] = await conexion.query<RowDataPacket[]>(
+            `SELECT idPago, estado FROM pago WHERE idOrdenPago = ?
+            AND estado IN ('Pendiente', 'En_proceso', 'Aprobado')
+            FOR UPDATE`, [orden.idOrdenPago],
+        );
+        if (pagos.length > 0) {
+            throw new BadRequestException(
+                'No puedes editar la reserva porque ya tienes pagos pendientes, en proceso o aprobados.',
+            );
+        }
+        await conexion.execute(
+            `UPDATE orden_de_pago SET total = ?
+            WHERE idOrdenPago = ?`, [nuevoTotal, orden.idOrdenPago],
+        );
+        return {
+            idOrdenPago: Number(orden.idOrdenPago),
+            idReserva,
+            total: nuevoTotal,
+        };
+    }
 
     private generarPDFOrdenPago(idOrdenPago: number, idReserva: number,
         total: number,): Promise<Buffer> {
@@ -237,6 +276,18 @@ export class PagosService {
 
             pdf.end();
         });
+    }
+
+    async actualizarPDFOrdenPago(idOrdenPago: number, idReserva: number, total: number,) {
+        const rutaPdf = await this.guardarPDFOrdenPago(
+            idOrdenPago,
+            idReserva,
+            total,
+        );
+        return {
+            idOrdenPago,
+            rutaPdf,
+        };
     }
 
     async iniciarPago(idPersona: number, idOrdenPago: number) {
@@ -648,6 +699,34 @@ export class PagosService {
             throw error;
         } finally {
             conexion.release();
+        }
+    }
+
+    async prepararCancelacionOrdenPago(conexion: PoolConnection, idReserva: number,) {
+        const [ordenes] = await conexion.query<OrdenPago[]>(
+            `SELECT idOrdenPago, total, estado, rutaPdf
+            FROM orden_de_pago WHERE idReserva = ? FOR UPDATE`, [idReserva],
+        );
+        if (ordenes.length === 0) {
+            return;
+        }
+        const orden = ordenes[0];
+
+        const [pagos] = await conexion.query<RowDataPacket[]>(
+            `SELECT idPago, estado FROM Pago WHERE idOrdenPago = ?
+            AND estado IN ('Pendiente', 'En_proceso', 'Aprobado')
+            FOR UPDATE`, [orden.idOrdenPago],
+        );
+        if (pagos.length > 0 || orden.estado === 'Pagada') {
+            throw new BadRequestException(
+                'No puedes cancelar la reserva porque tienes pagos pendientes, en proceso o aprobados.'
+            );
+        }
+        if (orden.estado !== 'Anulada') {
+            await conexion.execute(
+                `UPDATE orden_de_pago SET estado = 'Anulada'
+                WHERE idOrdenPago = ?`, [orden.idOrdenPago],
+            );
         }
     }
 }
