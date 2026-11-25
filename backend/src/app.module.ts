@@ -13,9 +13,11 @@ import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ArchivosModule } from './archivos/archivos.module';
 import { validateEnv } from './config/validate-env';
 import { HealthModule } from './health/health.module';
 import { PuntosModule } from './puntos/puntos.module';
+
 
 @Module({
   imports: [
@@ -37,6 +39,7 @@ import { PuntosModule } from './puntos/puntos.module';
     CalificacionesModule,
     AuthModule,
     AdminModule,
+    ArchivosModule,
   ],
   controllers: [AppController],
   providers: [AppService],

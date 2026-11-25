@@ -1,16 +1,19 @@
 import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
-import type { Pool } from 'mysql2/promise';
+import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { CrearReservaDto } from './dto/crearReserva.dto';
 import { RespuestaConductorDTO } from './dto/respuestaConductor.dto';
 import { DecisionSinConductorDTO } from './dto/desicionSinConductor.dto';
+import { PagosService } from '../pagos/pagos.service';
+import { ActualizarReservaDto } from './dto/actualizarReserva.dto';
 
 @Injectable()
 export class ReservasService {
 
     constructor(
         @Inject('DATABASE_CONNECTION')
-        private readonly database: Pool) {
+        private readonly database: Pool,
+        private readonly pagosService: PagosService) {
 
     }
 
@@ -30,12 +33,18 @@ export class ReservasService {
 
         const [vehiculos] = await this.database.query<RowDataPacket[]>(
             `SELECT idVehiculo, estado, estado_solicitud_revision,
-            idPuntoRecogida, idPuntoEntrega FROM vehiculo WHERE idVehiculo = ?`, [idVehiculo]
+            idPuntoRecogida, idPuntoEntrega, precioPorDia 
+            FROM vehiculo WHERE idVehiculo = ?`, [idVehiculo]
         );
         if (vehiculos.length === 0) {
             throw new NotFoundException('El vehiculo no existe. ')
         }
         const vehiculo = vehiculos[0];
+        if (vehiculo.precioPorDia === null || vehiculo.precioPorDia === undefined ||
+            !Number.isFinite(Number(vehiculo.precioPorDia))
+            || Number(vehiculo.precioPorDia) <= 0) {
+            throw new BadRequestException('El vehiculo no tiene un precio de alquiler válido.');
+        }
         if (vehiculo.estado !== 'Activo') {
             throw new BadRequestException('El vehiculo no está disponible para reservar.');
         }
@@ -83,6 +92,16 @@ export class ReservasService {
                 'La fecha y hora de finalizacion deben ser posteriores al inicio. '
             );
         }
+        const fechaInicio = new Date(
+            `${dto.fechaInicioServicio}T00:00:00`
+        );
+        const fechaFin = new Date(
+            `${dto.fechaFinServicio}T00:00:00`
+        );
+        const cantidadDias = Math.max(1, Math.ceil(
+            (fechaFin.getTime() - fechaInicio.getTime()) / (1000 * 60 * 60 * 24))
+        );
+        const precioEstimado = (vehiculo.precioPorDia) * cantidadDias
 
         const [reservasExistentes] = await this.database.query<RowDataPacket[]>(
             `SELECT idReserva FROM reserva WHERE idVehiculo = ?
@@ -123,6 +142,9 @@ export class ReservasService {
                 idConductor = Number(conductores[0].idConductor);
             }
         }
+        const estadoReserva = dto.solicitarConductor === true
+            ? 'Pendiente'
+            : 'Confirmada';
 
         const [resultado] = await this.database.query<ResultSetHeader>(
             `INSERT INTO reserva(
@@ -134,10 +156,11 @@ export class ReservasService {
             fechaFinServicio,
             horaFinServicio,
             estado,
+            precioEstimado,
             idPuntoRecogida,
             idPuntoEntrega,
             estadoRespuestaConductor
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 idCliente,
                 idVehiculo,
@@ -146,7 +169,8 @@ export class ReservasService {
                 horaInicio,
                 dto.fechaFinServicio,
                 horaFin,
-                'Pendiente',
+                estadoReserva,
+                precioEstimado,
                 vehiculo.idPuntoRecogida,
                 vehiculo.idPuntoEntrega,
                 idConductor !== null
@@ -157,7 +181,7 @@ export class ReservasService {
         return {
             mensaje: 'Solicitud de reserva creada correctamente.',
             idReserva: resultado.insertId,
-            estado: 'Pendiente',
+            estado: estadoReserva,
             requiereDecisionConductor:
                 dto.solicitarConductor === true && idConductor === null
         };
@@ -166,6 +190,11 @@ export class ReservasService {
 
     async responderReserva(idPersona: number, idReserva: number, dto: RespuestaConductorDTO) {
         const connection = await this.database.getConnection();
+        let ordenActualizada: {
+            idOrdenPago: number;
+            idReserva: number;
+            total: number;
+        } | null = null;
 
         try {
             await connection.beginTransaction();
@@ -189,7 +218,9 @@ export class ReservasService {
                 fechaInicioServicio,
                 horaInicioServicio,
                 fechaFinServicio,
-                horaFinServicio
+                horaFinServicio,
+                DATEDIFF(fechaFinServicio, fechaInicioServicio) AS cantidadDias,
+                precioEstimado
                 FROM reserva WHERE idReserva = ? FOR UPDATE`, [idReserva],
             );
             if (reservas.length === 0) {
@@ -204,17 +235,50 @@ export class ReservasService {
                 throw new BadRequestException('Esta reserva ya no esta pendiente de respuesta. ');
             }
             if (dto.aceptar) {
+
+                const cantidadDias = Math.max(1, Number(reserva.cantidadDias));
+                const precioConductor = 70000 * cantidadDias;
+                const precioActual = Number(reserva.precioEstimado);
+                if (reserva.precioEstimado === null ||
+                    reserva.precioEstimado === undefined ||
+                    !Number.isFinite(precioActual)) {
+                    throw new BadRequestException('La reserva no tiene un precio estimado.')
+                }
+                const nuevoPrecioEstimado = precioActual + precioConductor;
+                ordenActualizada = await this.pagosService.prepararActualizacionOrdenPago(
+                    connection,
+                    idReserva,
+                    nuevoPrecioEstimado,
+                );
+
                 await connection.query(
-                    `UPDATE reserva SET estadoRespuestaConductor = 'Aceptada'
-                    WHERE idReserva = ?`, [idReserva],
+                    `UPDATE reserva SET estadoRespuestaConductor = 'Aceptada',
+                    precioEstimado = ? WHERE idReserva = ?`,
+                    [nuevoPrecioEstimado, idReserva],
                 );
                 await connection.commit();
+                let pdfActualizado = null;
+                if (ordenActualizada) {
+                    try {
+                        pdfActualizado = await this.pagosService.actualizarPDFOrdenPago(
+                            ordenActualizada.idOrdenPago,
+                            idReserva,
+                            nuevoPrecioEstimado,
+                        );
+                    } catch {
+                        pdfActualizado = {
+                            advertencia: 'El conductor aceptó, pero no se pudo regenerar el PDF.',
+                        };
+                    }
+                }
                 return {
                     mensaje: 'Has aceptado el servicio.',
                     idReserva,
                     idConductor,
                     estado: 'Pendiente',
                     estadoRespuestaConductor: 'Aceptada',
+                    precioEstimado: nuevoPrecioEstimado,
+                    pdfActualizado,
                 };
             }
             let rechazados: number[] = [];
@@ -505,7 +569,305 @@ export class ReservasService {
             }))
         };
     }
+
+    async actualizarReserva(idPersona: number, idReserva: number, dto: ActualizarReservaDto,) {
+        const connection = await this.database.getConnection();
+        let ordenActualizada: {
+            idOrdenPago: number;
+            idReserva: number;
+            total: number;
+        } | null = null;
+
+        try {
+            await connection.beginTransaction();
+            const [reservas] = await connection.query<RowDataPacket[]>(
+                `SELECT r.*,
+                c.idPersona,
+                v.precioPorDia
+                FROM reserva r
+                INNER JOIN cliente c ON c.idCliente = r.idCliente
+                INNER JOIN vehiculo v ON v.idVehiculo = r.idVehiculo
+                WHERE r.idReserva = ? FOR UPDATE`, [idReserva],
+            );
+            if (reservas.length === 0) {
+                throw new NotFoundException('La reserva no existe. ')
+            }
+            const reserva = reservas[0];
+            if (Number(reserva.idPersona) !== idPersona) {
+                throw new BadRequestException(
+                    'Esta reserva no pertecene a tu cuenta.',
+                );
+            }
+            if (!['Pendiente', 'Confirmada'].includes(reserva.estado)) {
+                throw new BadRequestException(
+                    'No puedes editar una reserva que ya está cancelada o en curso.',
+                );
+            }
+            const fechaInicio = dto.fechaInicioServicio ??
+                String(reserva.fechaInicioServicio).slice(0, 10);
+            const fechaFin = dto.fechaFinServicio ??
+                String(reserva.fechaFinServicio).slice(0, 10);
+
+            const horas: Record<string, string> = {
+                '08:00 AM': '08:00:00',
+                '09:00 AM': '09:00:00',
+                '10:00 AM': '10:00:00',
+                '11:00 AM': '11:00:00',
+                '2:00 PM': '14:00:00',
+                '3:00 PM': '15:00:00',
+                '4:00 PM': '16:00:00',
+                '5:00 PM': '17:00:00',
+                '6:00 PM': '18:00:00',
+            };
+            const obtenerHoraFormulario = (horaBD: string): string => {
+                const hora = String(horaBD).slice(0, 8);
+                return Object.keys(horas).find(
+                    (key) => horas[key] === hora,
+                ) ?? '';
+            };
+            const horaInicioFormulario = dto.horaInicioServicio ??
+                obtenerHoraFormulario(reserva.horaInicioServicio);
+
+            const horaFinFormulario = dto.horaFinServicio ??
+                obtenerHoraFormulario(reserva.horaFinServicio);
+
+            const horaInicio = horas[horaInicioFormulario];
+            const horaFin = horas[horaFinFormulario];
+
+            if (!horaInicio || !horaFin) {
+                throw new BadRequestException('La hora seleccionada no está permitida.',);
+            }
+            const inicio = `${fechaInicio} ${horaInicio}`;
+            const fin = `${fechaFin} ${horaFin}`;
+
+            if (fin <= inicio) {
+                throw new BadRequestException(
+                    'La fecha y hora de finalización deben ser posteriores al inicio.',
+                );
+            }
+            const fechaInicioDate = new Date(`${fechaInicio}T00:00:00`);
+            const fechaFinDate = new Date(`${fechaFin}T00:00:00`);
+
+            const cantidadDias = Math.max(
+                1,
+                Math.ceil(
+                    (fechaFinDate.getTime() - fechaInicioDate.getTime()) /
+                    (1000 * 60 * 60 * 24),
+                ),
+            );
+
+            const precioPorDia = Number(reserva.precioPorDia);
+
+            if (!Number.isFinite(precioPorDia) || precioPorDia <= 0) {
+                throw new BadRequestException(
+                    'El vehículo no tiene un precio de alquiler válido.',
+                );
+            }
+
+            const precioBase = precioPorDia * cantidadDias;
+
+            const [reservasExistentes] = await connection.query<RowDataPacket[]>(
+                `SELECT idReserva FROM reserva WHERE idVehiculo = ?
+                AND idReserva <> ? AND estado IN ('Pendiente', 'Confirmada', 'EnCurso')
+                AND TIMESTAMP(fechaInicioServicio, horaInicioServicio) < TIMESTAMP(?, ?)
+                AND TIMESTAMP(fechaFinServicio, horaFinServicio) > TIMESTAMP(?, ?)`,
+                [
+                    reserva.idVehiculo,
+                    idReserva,
+                    fechaFin,
+                    horaFin,
+                    fechaInicio,
+                    horaInicio,
+                ],
+            );
+
+            if (reservasExistentes.length > 0) {
+                throw new BadRequestException(
+                    'El vehículo ya tiene una reserva en ese horario.',
+                );
+            }
+
+            const solicitarConductor = dto.solicitarConductor ??
+                (
+                    reserva.idConductor !== null || (
+                        reserva.estadoRespuestaConductor === 'Sin_conductor'
+                        && reserva.decisionSinConductor !== 'Continuar'
+                    )
+                );
+
+            let idConductor: number | null = null;
+            let estadoRespuestaConductor: string | null = null;
+            let estadoReserva = 'Confirmada';
+
+            if (solicitarConductor) {
+                let rechazados: number[] = [];
+
+                if (reserva.conductoresRechazados) {
+                    const datos = typeof reserva.conductoresRechazados === 'string'
+                        ? JSON.parse(reserva.conductoresRechazados)
+                        : reserva.conductoresRechazados;
+
+                    rechazados = Array.isArray(datos)
+                        ? datos.map(Number)
+                        : [];
+                }
+
+                const filtroRechazados = rechazados.length > 0
+                    ? `AND c.idConductor NOT IN (${rechazados.map(() => '?').join(', ')})`
+                    : '';
+
+                const [conductores] = await connection.query<RowDataPacket[]>(
+                    `SELECT c.idConductor FROM conductor c
+                    INNER JOIN licencia l ON l.idPersona = c.idPersona
+                    WHERE c.disponibilidad = 1 AND l.estado = 'Vigente'
+                    AND l.fechaExpiracion >= CURDATE() ${filtroRechazados}
+                    AND NOT EXISTS (
+                    SELECT 1
+                    FROM reserva r
+                    WHERE r.idConductor = c.idConductor
+                    AND r.idReserva <> ?
+                    AND r.estado IN ('Pendiente', 'Confirmada', 'EnCurso')
+                    AND TIMESTAMP(r.fechaInicioServicio, r.horaInicioServicio) < TIMESTAMP(?, ?)
+                    AND TIMESTAMP(r.fechaFinServicio, r.horaFinServicio) > TIMESTAMP(?, ?)
+                    ) ORDER BY c.calificacion DESC, c.idConductor DESC LIMIT 1`,
+                    [
+                        ...rechazados,
+                        idReserva,
+                        fechaFin,
+                        horaFin,
+                        fechaInicio,
+                        horaInicio,
+                    ],
+                );
+
+                if (conductores.length > 0) {
+                    idConductor = Number(conductores[0].idConductor);
+                    estadoRespuestaConductor = 'Pendiente';
+                } else {
+                    estadoRespuestaConductor = 'Sin_conductor';
+                }
+
+                estadoReserva = 'Pendiente';
+            }
+
+            ordenActualizada = await this.pagosService.prepararActualizacionOrdenPago(
+                connection,
+                idReserva,
+                precioBase,
+            );
+
+            await connection.query(
+                `UPDATE reserva SET
+                fechaInicioServicio = ?,
+                horaInicioServicio = ?,
+                fechaFinServicio = ?,
+                horaFinServicio = ?,
+                idConductor = ?,
+                estadoRespuestaConductor = ?,
+                decisionSinConductor = NULL,
+                precioEstimado = ?,
+                estado = ?
+                WHERE idReserva = ?`,
+                [
+                    fechaInicio,
+                    horaInicio,
+                    fechaFin,
+                    horaFin,
+                    idConductor,
+                    estadoRespuestaConductor,
+                    precioBase,
+                    estadoReserva,
+                    idReserva,
+                ],
+            );
+
+            await connection.commit();
+
+            let pdfActualizado = null;
+
+            if (ordenActualizada) {
+                try {
+                    pdfActualizado =
+                        await this.pagosService.actualizarPDFOrdenPago(
+                            ordenActualizada.idOrdenPago,
+                            idReserva,
+                            precioBase,
+                        );
+                } catch {
+                    pdfActualizado = {
+                        advertencia: 'La reserva se actualizó, pero no se pudo regenerar el PDF.',
+                    };
+                }
+            }
+
+            return {
+                mensaje: 'Reserva actualizada correctamente.',
+                idReserva,
+                fechaInicioServicio: fechaInicio,
+                horaInicioServicio: horaInicioFormulario,
+                fechaFinServicio: fechaFin,
+                horaFinServicio: horaFinFormulario,
+                solicitarConductor,
+                idConductor,
+                estadoRespuestaConductor,
+                estado: estadoReserva,
+                precioEstimado: precioBase,
+                pdfActualizado,
+            };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    async cancelarReserva(idPersona: number, idReserva: number) {
+        const connection = await this.database.getConnection();
+
+        try {
+            await connection.beginTransaction();
+            const [reservas] = await connection.query<RowDataPacket[]>(
+                `SELECT 
+                r.idReserva,
+                r.estado,
+                c.idPersona FROM reserva r
+                INNER JOIN cliente c ON c.idCliente = r.idCliente
+                WHERE r.idReserva = ? FOR UPDATE`, [idReserva],
+            );
+            if (reservas.length === 0) {
+                throw new NotFoundException('La reserva no existe.');
+            }
+            const reserva = reservas[0];
+            if (Number(reserva.idPersona) !== idPersona) {
+                throw new BadRequestException('Esta reserva no pertenece a tu cuenta.');
+            }
+            if (!['Pendiente', 'Confirmada'].includes(reserva.estado)) {
+                throw new BadRequestException(
+                    'No puedes cancelar una reserva que ya esta en curso, finalizada o cancelada. ',
+                );
+            }
+            await this.pagosService.prepararCancelacionOrdenPago(connection, idReserva);
+            await connection.query(
+                `UPDATE reserva SET estado = 'Cancelada'
+                WHERE idreserva = ?`, [idReserva],
+            );
+            await connection.commit();
+            return {
+                mensaje: 'Reserva cancelada con exito.',
+                idReserva,
+                estado: 'Cancelada',
+            };
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
 }
+
 
 
 

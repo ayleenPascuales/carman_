@@ -12,35 +12,37 @@ export class VehiculosService {
         private readonly database: Pool) { }
 
     async crearVehiculo(idPersona: number, dto: CrearVehiculoDto) {
+        const connection = await this.database.getConnection();
 
-        const [propietarios] = await this.database.query<RowDataPacket[]>(
-            `SELECT idPropietario FROM propietario WHERE idPersona = ?`, [idPersona]
-        );
-        if (propietarios.length === 0) {
-            throw new NotFoundException('Actualmente no eres un propietario.');
-        }
-        const idPropietario = propietarios[0].idPropietario;
+        try {
+            await connection.beginTransaction();
 
-        const [vehiculos] = await this.database.query<RowDataPacket[]>(
-            `SELECT idVehiculo FROM vehiculo WHERE placa = ?`, [dto.placa]
-        );
-        if (vehiculos.length > 0) {
-            throw new BadRequestException('Ya existe un vehiculo registrado con esa placa. ');
-        }
+            const [personas] = await connection.execute<RowDataPacket[]>(
+                `SELECT idPersona FROM persona WHERE idPersona = ? FOR UPDATE`, [idPersona]
+            );
+            if (personas.length === 0) {
+                throw new NotFoundException('El usuario no existe. ');
+            }
 
-        const [puntoRecogida] = await this.database.query<RowDataPacket[]>(
-            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoRecogida]
-        );
-        if (puntoRecogida.length === 0) {
-            throw new NotFoundException('El punto de recogida seleccionado no existe. ')
-        }
+            const [propietarios] = await connection.execute<RowDataPacket[]>(
+                `SELECT idPropietario FROM propietario WHERE idPersona = ? FOR UPDATE`, [idPersona]
+            );
+            let idPropietario: number;
+            if (propietarios.length > 0) {
+                idPropietario = propietarios[0].idPropietario;
+            } else {
+                const [nuevoPropietario] = await connection.execute<ResultSetHeader>(
+                    `INSERT INTO propietario (idPersona) VALUES (?)`, [idPersona]
+                );
+                idPropietario = nuevoPropietario.insertId;
+            }
 
-        const [puntoEntrega] = await this.database.query<RowDataPacket[]>(
-            `SELECT idPunto FROM punto_autorizado WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoEntrega]
-        );
-        if (puntoEntrega.length === 0) {
-            throw new NotFoundException('El punto de entrega seleccionado no existe. ')
-        }
+            const [vehiculos] = await connection.execute<RowDataPacket[]>(
+                `SELECT idVehiculo FROM vehiculo WHERE placa = ?`, [dto.placa]
+            );
+            if (vehiculos.length > 0) {
+                throw new BadRequestException('Ya existe un vehículo registrado con esta placa.');
+            }
 
         const [resultado] = await this.database.query<ResultSetHeader>(
             `INSERT INTO vehiculo(
@@ -79,24 +81,22 @@ export class VehiculosService {
             idVehiculo: resultado.insertId
         }
     }
-
-    //?OBTENER TODOS LOS VEHICULOS
+    //?OBTENER TODOS LOS VEHICULOS PANEL PROPIETARIO
     async obtenerMisVehiculos(idPersona: number) {
         const [propietarios] = await this.database.query<RowDataPacket[]>(
             `SELECT idPropietario FROM propietario WHERE idPersona = ?`, [idPersona]
         );
         if (propietarios.length === 0) {
-            throw new NotFoundException('No tienes habilitada la función de propietario en tu cuenta. ');
+            throw new NotFoundException('No tienes vehiculos publicados.');
         }
-        const idPropietario = propietarios[0].idPropietario;
 
+        const idPropietario = propietarios[0].idPropietario;
         const [vehiculos] = await this.database.query<RowDataPacket[]>(
             `SELECT v.*, punto.ciudad, punto.nombre AS ubicacion
              FROM vehiculo v
              LEFT JOIN punto_autorizado punto ON punto.idPunto = v.idPuntoRecogida
              WHERE v.idPropietario = ?`, [idPropietario]
         );
-
         return vehiculos;
     }
 
@@ -138,11 +138,14 @@ export class VehiculosService {
         }
         if (dto.idPuntoEntrega !== undefined) {
             const [punto] = await this.database.query<RowDataPacket[]>(
-                `SELECT idPunto FROM punto_autorizado
-                WHERE idPunto = ? AND activo = TRUE`, [dto.idPuntoEntrega]
+                `SELECT idPunto FROM punto_autorizado WHERE idPunto = ?
+                AND activo = 1`, [dto.idPuntoEntrega]
             );
             if (punto.length === 0) {
-                throw new NotFoundException('El punto de entrega no existe o esta inactivo.');
+                throw new NotFoundException(
+                    'EL punto de entrega no existe o esta inactivo. '
+                )
+
             }
         }
 

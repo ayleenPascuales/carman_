@@ -14,6 +14,7 @@ export function databaseOptions(env: Record<string, string | undefined>): PoolOp
     user: env.DB_USER,
     password: env.DB_PASSWORD,
     database: env.DB_NAME,
+    timezone: '-05:00',
     ssl: {
       rejectUnauthorized: true,
       minVersion: 'TLSv1.2',

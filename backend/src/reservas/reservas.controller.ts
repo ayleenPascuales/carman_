@@ -3,6 +3,7 @@ import { ReservasService } from './reservas.service';
 import { CrearReservaDto } from './dto/crearReserva.dto';
 import { AuthGuard } from '../auth/auth.guard';
 import { RespuestaConductorDTO } from './dto/respuestaConductor.dto';
+import { ActualizarReservaDto } from './dto/actualizarReserva.dto';
 
 @Controller('reservas')
 export class ReservasController {
@@ -24,5 +25,17 @@ export class ReservasController {
     @Get('mis-reservas')
     obtenerMisReservas(@Req() request: any) {
         return this.reservasService.obtenerMisReservas(request.user.idPersona);
+    }
+
+    @UseGuards(AuthGuard)
+    @Patch(':idReserva')
+    actualizarReserva(@Req() request: any, @Param('idReserva') idReserva: string, @Body() dto: ActualizarReservaDto) {
+        return this.reservasService.actualizarReserva(request.user.idPersona, Number(idReserva), dto);
+    }
+
+    @UseGuards(AuthGuard)
+    @Patch(':idReserva/cancelar')
+    cancelarReserva(@Req() request: any, @Param('idReserva') idReserva: string,) {
+        return this.reservasService.cancelarReserva(request.user.idPersona, Number(idReserva),);
     }
 }
