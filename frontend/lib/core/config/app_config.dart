@@ -1,16 +1,24 @@
-/// Compile-time configuration.
+import 'package:flutter/foundation.dart';
+
+/// Configuration for the demo and live API modes.
 ///
 /// The app ships with a deterministic demo data source so that the complete
 /// experience can be presented without a running backend. Point it at the
-/// NestJS API with:
+/// NestJS API in local development with:
 ///
 /// flutter run --dart-define=CARMAN_USE_LIVE_API=true \
 ///   --dart-define=CARMAN_API_URL=http://localhost:3000
+///
+/// On Vercel, web builds use the current deployment's origin + /api by default,
+/// so previews and custom domains work without baking a hostname into Flutter.
 abstract final class AppConfig {
-  static const apiBaseUrl = String.fromEnvironment(
-    'CARMAN_API_URL',
-    defaultValue: 'http://localhost:3000',
-  );
+  static const _configuredApiBaseUrl = String.fromEnvironment('CARMAN_API_URL');
+
+  static String get apiBaseUrl => _configuredApiBaseUrl.isNotEmpty
+      ? _configuredApiBaseUrl
+      : kIsWeb
+      ? '${Uri.base.origin}/api'
+      : 'http://localhost:3000';
 
   static const useLiveApi = bool.fromEnvironment(
     'CARMAN_USE_LIVE_API',

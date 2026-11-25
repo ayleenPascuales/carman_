@@ -60,6 +60,8 @@ flutter build web --release    # Build web
 
 La app arranca en modo **demo** con datos deterministas, por lo que todas las pantallas se pueden probar sin backend.
 
+Para la API local, usar `flutter run -d chrome --dart-define=CARMAN_USE_LIVE_API=true --dart-define=CARMAN_API_URL=http://localhost:3000`. El proyecto Vercel único compila Flutter Web en modo API real con `frontend/scripts/build-web.sh`: allí, sin definir `CARMAN_API_URL`, el cliente usa el origen actual más `/api` (también en previews). Las versiones nativas requieren `--dart-define=CARMAN_API_URL=https://<tu-proyecto>.vercel.app/api` al compilarlas y se distribuyen fuera de Vercel. Consulta la [guía de despliegue](../README.md#despliegue-web--api-en-un-proyecto-vercel) y las [limitaciones de los endpoints](../backend/readme.md#alcance-pendiente).
+
 ### Credenciales demo
 
 | Campo | Valor |

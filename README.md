@@ -53,6 +53,17 @@ npm run start:dev
 
 `CARMAN_USE_LIVE_API=true` y `CARMAN_API_URL=http://localhost:3000` activan el consumo de la API real desde Flutter.
 
+## Despliegue web + API en un proyecto Vercel
+
+El [`vercel.json`](vercel.json) de la raíz usa [Vercel Services (beta)](https://vercel.com/docs/services): Flutter Web se compila como sitio estático y NestJS como función. Ambos comparten **un proyecto y un dominio**. En Vercel, `/` (incluidos enlaces directos como `/admin`) sirve Flutter, mientras `/api/health`, `/api/auth/...` y las demás rutas `/api/...` llegan a NestJS sin cambiar sus rutas internas.
+
+1. Antes de desplegar, rotar las credenciales TiDB y Firebase Admin que se compartieron anteriormente. Revisar el esquema de `carmandb` y la tabla OTP propuesta en `backend/migrations/002_phone_verification.sql`; **no ejecutar `db:migrate` sobre esa base existente**.
+2. Subir los cambios al repositorio y crear **un único proyecto Vercel** con **Root Directory = raíz del repositorio** (no `backend` ni `frontend`). Usar Node.js 22/24; no sobrescribir los comandos de compilación ni la carpeta de salida definidos por servicio en `vercel.json`. El build web instala un Flutter 3.50.1 fijado y verificado, y activa `CARMAN_USE_LIVE_API=true`; puede tardar varios minutos.
+3. En **Settings → Environment Variables**, configurar solo para el servidor `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_CA`, `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` (o `FIREBASE_SERVICE_ACCOUNT_JSON`), `TEXTBEE_API_KEY`, `SMS_OTP_SECRET`, `CRON_SECRET` y `CORS_ORIGINS=https://<dominio-del-proyecto>`. Revisar `backend/.env.example` y habilitar Production/Preview según corresponda. Guardar las claves en Vercel, **no en Git ni en `dart-define`**.
+4. Verificar `/`, `/admin`, un archivo real como `/main.dart.js`, `/api/health` y que `/api/internal/inactive-accounts` sin `CRON_SECRET` devuelva 403. Después, iniciar sesión con la cuenta de prueba existente (no registrarla de nuevo) y probar Firebase/textbee con sus proveedores configurados. `/api/health` solo comprueba conexión a TiDB: no confirma tablas, correo ni SMS.
+
+Flutter Web usa automáticamente el dominio actual más `/api`, tanto en producción como en previews. Android/iOS se compilan y distribuyen **por separado**: para conectarlos a este proyecto, usar `--dart-define=CARMAN_USE_LIVE_API=true --dart-define=CARMAN_API_URL=https://<dominio-del-proyecto>/api`. Vercel no ejecuta las apps nativas. Varias rutas de reservas, pagos y otros módulos **aún no están implementadas** en el backend; desplegar la web en modo API no hace funcionales esos flujos. Detalles de configuración y límites: [`backend/readme.md`](backend/readme.md).
+
 ## Estado
 
 Frontend completo y navegable en modo demo. Backend en desarrollo: reservas, pagos y notificaciones pendientes. La integración en vivo está preparada a nivel de repositorios.
