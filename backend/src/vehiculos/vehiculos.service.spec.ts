@@ -29,7 +29,7 @@ describe('VehiculosService', () => {
       .mockResolvedValueOnce([{ insertId: 18 }]);
     const result = await service.crearVehiculo(10, {
       placa: 'ABC123', marca: 'Toyota', modelo: 'Corolla', anio: 2022,
-      capacidad: 4, tipoVehiculo: 'Sedan',
+      capacidad: 4, tipoVehiculo: 'Sedan', precioPorDia: 120.5,
       fotos: ['https://example.com/carro.jpg'],
       tarjetaPropiedad: 'https://example.com/tarjeta.jpg',
       idPuntoRecogida: 1, idPuntoEntrega: 2,
@@ -40,5 +40,18 @@ describe('VehiculosService', () => {
       expect.arrayContaining(['ABC123']),
     );
     expect(database.query.mock.lastCall?.[0]).not.toContain('RETURNING');
+    expect(database.query.mock.lastCall?.[0]).toContain('precioPorDia');
+    expect(database.query.mock.lastCall?.[1]).toContain(120.5);
+  });
+
+  it('obtiene la ciudad real del punto de recogida, conservando vehículos sin punto', async () => {
+    database.query.mockResolvedValueOnce([[{ idPropietario: 4 }]])
+      .mockResolvedValueOnce([[{ idVehiculo: 18, ciudad: 'Ciudad de prueba' }]]);
+    expect(await service.obtenerMisVehiculos(10)).toEqual([
+      { idVehiculo: 18, ciudad: 'Ciudad de prueba' },
+    ]);
+    const sql = database.query.mock.lastCall?.[0] as string;
+    expect(sql).toContain('LEFT JOIN punto_autorizado');
+    expect(sql).toContain('punto.ciudad');
   });
 });

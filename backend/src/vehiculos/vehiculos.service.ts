@@ -51,12 +51,13 @@ export class VehiculosService {
             anio,
             capacidad,
             tipoVehiculo,
+            precioPorDia,
             idPuntoRecogida,
             idPuntoEntrega,
             fotos, 
             descripcion,
             tarjetaPropiedad
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 idPropietario,
                 dto.placa,
@@ -65,6 +66,7 @@ export class VehiculosService {
                 dto.anio,
                 dto.capacidad,
                 dto.tipoVehiculo,
+                dto.precioPorDia ?? null,
                 dto.idPuntoRecogida,
                 dto.idPuntoEntrega,
                 JSON.stringify(dto.fotos),
@@ -89,7 +91,10 @@ export class VehiculosService {
         const idPropietario = propietarios[0].idPropietario;
 
         const [vehiculos] = await this.database.query<RowDataPacket[]>(
-            `SELECT * FROM vehiculo WHERE idPropietario = ?`, [idPropietario]
+            `SELECT v.*, punto.ciudad, punto.nombre AS ubicacion
+             FROM vehiculo v
+             LEFT JOIN punto_autorizado punto ON punto.idPunto = v.idPuntoRecogida
+             WHERE v.idPropietario = ?`, [idPropietario]
         );
 
         return vehiculos;
@@ -99,9 +104,10 @@ export class VehiculosService {
     //? DESDE EL PANEL DE PROPIETARIO
     async obtenerVehiculo(idPersona: number, idVehiculo: number) {
         const [vehiculos] = await this.database.query<RowDataPacket[]>(
-            `SELECT v.* FROM vehiculo v
+            `SELECT v.*, punto.ciudad, punto.nombre AS ubicacion FROM vehiculo v
             INNER JOIN propietario p 
             ON v.idPropietario = p.idPropietario 
+            LEFT JOIN punto_autorizado punto ON punto.idPunto = v.idPuntoRecogida
             WHERE v.idVehiculo = ? AND p.idPersona = ?`, [idVehiculo, idPersona]
         );
         if (vehiculos.length === 0) {
@@ -115,6 +121,7 @@ export class VehiculosService {
 
         if (dto.fotos === undefined && dto.descripcion === undefined
             && dto.idPuntoRecogida === undefined && dto.idPuntoEntrega === undefined
+            && dto.precioPorDia === undefined
         ) {
             throw new BadRequestException('Debes actualizar almenos un dato. ');
         }
@@ -142,14 +149,16 @@ export class VehiculosService {
         await this.database.query(
             `UPDATE vehiculo SET fotos = COALESCE(?, fotos),
             descripcion = COALESCE(?, descripcion),
-            idPuntoRecogida = COALESCE(?, idPuntoRecogida),
-            idPuntoEntrega = COALESCE(?, idPuntoEntrega)
+             idPuntoRecogida = COALESCE(?, idPuntoRecogida),
+             idPuntoEntrega = COALESCE(?, idPuntoEntrega),
+             precioPorDia = COALESCE(?, precioPorDia)
             WHERE idVehiculo = ?`,
             [
                 dto.fotos !== undefined ? JSON.stringify(dto.fotos) : null,
                 dto.descripcion !== undefined ? dto.descripcion : null,
                 dto.idPuntoRecogida ?? null,
                 dto.idPuntoEntrega ?? null,
+                dto.precioPorDia ?? null,
                 idVehiculo
             ]
         );

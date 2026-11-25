@@ -22,7 +22,9 @@ class CarmanImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = path.startsWith('http')
+    final image = path.isEmpty
+        ? _fallback()
+        : path.startsWith('http')
         ? Image.network(
             path,
             fit: fit,

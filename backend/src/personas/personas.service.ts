@@ -19,6 +19,21 @@ export class PersonasService {
         private readonly verification: VerificationService,
     ) { }
 
+    private async validarPuntosActivos(
+        connection: PoolConnection, vehiculo: { idPuntoRecogida: number; idPuntoEntrega: number },
+    ): Promise<void> {
+        const [puntos] = await connection.execute<RowDataPacket[]>(
+            `SELECT idPunto FROM punto_autorizado
+             WHERE idPunto IN (?, ?) AND activo = TRUE`,
+            [vehiculo.idPuntoRecogida, vehiculo.idPuntoEntrega],
+        );
+        const activos = new Set(puntos.map((punto) => Number(punto.idPunto)));
+        if (!activos.has(vehiculo.idPuntoRecogida) ||
+            !activos.has(vehiculo.idPuntoEntrega)) {
+            throw new BadRequestException('Selecciona puntos de recogida y entrega activos.');
+        }
+    }
+
     async registroInicial(dto: RegistroInicialDto) {
         this.verification.validarTelefono(dto.persona.telefono);
         this.verification.comprobarConfiguracion();
@@ -72,6 +87,16 @@ export class PersonasService {
             );
         }
 
+        // carmandb no tiene índice UNIQUE para persona.email. No crear un UID
+        // nuevo para un correo que ya figure en una persona antigua sin UID.
+        const [correosExistentes] = await this.database.execute<RowDataPacket[]>(
+            'SELECT idPersona FROM persona WHERE LOWER(email) = LOWER(?) LIMIT 1',
+            [dto.persona.email],
+        );
+        if (correosExistentes.length > 0) {
+            throw new ConflictException('El correo ya se encuentra registrado.');
+        }
+
         let connection: PoolConnection | undefined;
         let uidFirebase: string | undefined;
         let transaccionIniciada = false;
@@ -118,8 +143,8 @@ export class PersonasService {
                     dto.persona.telefono,
                     dto.persona.fechaNacimiento,
                     dto.persona.ciudad,
-                    dto.persona.direccion,
-                    dto.persona.fotoPerfil,
+                    dto.persona.direccion ?? null,
+                    dto.persona.fotoPerfil ?? '',
                 ],
             );
             const idPersona = resultadoPersona.insertId;
@@ -174,6 +199,7 @@ export class PersonasService {
 
             if (esPropietario && idPropietario !== undefined) {
                 for (const vehiculo of dto.vehiculos!) {
+                    await this.validarPuntosActivos(connection, vehiculo);
                     await connection.execute(
                         `INSERT INTO vehiculo(
                             idPropietario,
@@ -183,12 +209,13 @@ export class PersonasService {
                             anio,
                             capacidad,
                             tipoVehiculo,
+                            precioPorDia,
                             fotos,
                             descripcion,
                             idPuntoRecogida,
                             idPuntoEntrega,
                             tarjetaPropiedad
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             idPropietario,
                             vehiculo.placa,
@@ -197,6 +224,7 @@ export class PersonasService {
                             vehiculo.anio,
                             vehiculo.capacidad,
                             vehiculo.tipoVehiculo,
+                            vehiculo.precioPorDia ?? null,
                             JSON.stringify(vehiculo.fotos),
                             vehiculo.descripcion ?? null,
                             vehiculo.idPuntoRecogida,
@@ -409,6 +437,7 @@ export class PersonasService {
             }
             if (esPropietario && idPropietario !== undefined) {
                 for (const vehiculo of dto.vehiculos!) {
+                    await this.validarPuntosActivos(connection, vehiculo);
                     await connection.execute(
                         `INSERT INTO vehiculo (
                         idPropietario,
@@ -418,12 +447,13 @@ export class PersonasService {
                         anio,
                         capacidad,
                         tipoVehiculo,
+                        precioPorDia,
                         fotos,
                         descripcion,
                         idPuntoRecogida,
                         idPuntoEntrega,
                         tarjetaPropiedad
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             idPropietario,
                             vehiculo.placa,
@@ -432,6 +462,7 @@ export class PersonasService {
                             vehiculo.anio,
                             vehiculo.capacidad,
                             vehiculo.tipoVehiculo,
+                            vehiculo.precioPorDia ?? null,
                             JSON.stringify(vehiculo.fotos),
                             vehiculo.descripcion ?? null,
                             vehiculo.idPuntoRecogida,
@@ -646,8 +677,16 @@ export class PersonasService {
             EXISTS(SELECT 1 FROM administrador WHERE idPersona = ? AND estado = 'Activo') AS administrador`,
             [idPersona, idPersona, idPersona, idPersona],
         );
+        const [licencias] = await this.database.execute<RowDataPacket[]>(
+            `SELECT CASE
+                WHEN estado = 'Vigente' AND fechaExpiracion < CURDATE() THEN 'Vencida'
+                ELSE estado END AS estado
+             FROM licencia WHERE idPersona = ? LIMIT 1`,
+            [idPersona],
+        );
         return {
             ...personas[0],
+            licenciaEstado: licencias[0]?.estado ?? null,
             roles: {
                 cliente: Boolean(roles[0].cliente),
                 conductor: Boolean(roles[0].conductor),

@@ -4,6 +4,13 @@ import type { Auth, DecodedIdToken } from 'firebase-admin/auth';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
+interface PersonaLogin extends RowDataPacket {
+    idPersona: number;
+    email: string;
+    estado: string;
+    uidFirebase: string | null;
+}
+
 @Injectable()
 export class AuthService {
     constructor(
@@ -41,23 +48,19 @@ export class AuthService {
     }
 
     async iniciarSesion(identificador: string, contrasena: string) {
-        const [personas] = await this.database.query<RowDataPacket[]>(
-            `SELECT email, estado, uidFirebase, idPersona FROM persona
-            WHERE ${identificador.includes('@') ? 'email' : 'usuario'} = ?
-            LIMIT 1`, [identificador]
-        );
-
-        const persona = personas[0] as {
-            email: string; estado: string; uidFirebase: string; idPersona: number;
-        } | undefined;
-
-        if (!persona) {
-            throw new UnauthorizedException('Credenciales incorrectas. ')
-        }
-        if (persona.estado === 'Suspendido') {
-            throw new ForbiddenException(
-                'Tu cuenta ha sido suspendida. Contacta con administracion. '
+        const esEmail = identificador.includes('@');
+        let email = identificador;
+        let personaUsuario: PersonaLogin | undefined;
+        if (!esEmail) {
+            const [personas] = await this.database.query<PersonaLogin[]>(
+                `SELECT idPersona, email, estado, uidFirebase
+                 FROM persona WHERE usuario = ? LIMIT 1`, [identificador],
             );
+            personaUsuario = personas[0];
+            if (!personaUsuario?.email) {
+                throw new UnauthorizedException('Credenciales incorrectas. ');
+            }
+            email = personaUsuario.email;
         }
         const apiKey = this.configService.getOrThrow<string>(
             'FIREBASE_API_KEY',
@@ -71,7 +74,7 @@ export class AuthService {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        email: persona.email, password: contrasena, returnSecureToken: true,
+                        email, password: contrasena, returnSecureToken: true,
                     }),
                     signal: AbortSignal.timeout(10_000),
                 },
@@ -94,8 +97,24 @@ export class AuthService {
             expiresIn: string;
         };
         const verified = await this.verificarToken(datos.idToken);
-        if (datos.localId !== persona.uidFirebase || verified.uid !== persona.uidFirebase) {
+        if (verified.uid !== datos.localId) {
             throw new UnauthorizedException('La cuenta de Firebase no coincide con el usuario registrado.');
+        }
+        // email no es UNIQUE en el esquema exportado. Resolver siempre por el
+        // UID verificado, no por la primera fila que coincida con el correo.
+        const [personas] = await this.database.query<PersonaLogin[]>(
+            `SELECT idPersona, email, estado, uidFirebase FROM persona
+             WHERE uidFirebase = ? LIMIT 1`, [verified.uid],
+        );
+        const persona = personas[0];
+        if (!persona || persona.email !== email
+            || (personaUsuario && persona.idPersona !== personaUsuario.idPersona)) {
+            throw new UnauthorizedException('La cuenta de Firebase no coincide con el usuario registrado.');
+        }
+        if (persona.estado === 'Suspendido') {
+            throw new ForbiddenException(
+                'Tu cuenta ha sido suspendida. Contacta con administracion. '
+            );
         }
         await this.registrarActividad(persona.idPersona);
         await this.sincronizarEmailVerificado(persona.idPersona, verified.email_verified === true);

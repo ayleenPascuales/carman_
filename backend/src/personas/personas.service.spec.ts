@@ -42,7 +42,12 @@ describe('PersonasService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    connection.execute.mockResolvedValue([{ insertId: 42 }]);
+    database.execute.mockResolvedValue([[]]);
+    connection.execute.mockImplementation(async (sql: string) =>
+      sql.includes('FROM punto_autorizado')
+        ? [[{ idPunto: 7 }, { idPunto: 8 }]]
+        : [{ insertId: 42 }],
+    );
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PersonasService,
@@ -78,6 +83,61 @@ describe('PersonasService', () => {
     expect(connection.release).toHaveBeenCalled();
   });
 
+  it('guarda precioPorDia al registrar un propietario con vehículo', async () => {
+    await service.registroInicial({
+      ...registration,
+      roles: Rol.PROPIETARIO,
+      vehiculos: [{
+        placa: 'PRB123', marca: 'Marca de prueba', modelo: 'Modelo de prueba',
+        anio: 2024, capacidad: 4, tipoVehiculo: 'SUV',
+        idPuntoRecogida: 7, idPuntoEntrega: 8, precioPorDia: 120.5,
+        fotos: ['https://example.com/foto.jpg'],
+        tarjetaPropiedad: 'https://example.com/tarjeta.jpg',
+      }],
+    });
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO vehiculo'),
+      expect.arrayContaining([120.5]),
+    );
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining('AND activo = TRUE'), [7, 8],
+    );
+  });
+
+  it('no registra un vehículo con puntos inactivos durante el alta', async () => {
+    connection.execute.mockImplementation(async (sql: string) =>
+      sql.includes('FROM punto_autorizado')
+        ? [[{ idPunto: 7 }]]
+        : [{ insertId: 42 }],
+    );
+    await expect(service.registroInicial({
+      ...registration,
+      roles: Rol.PROPIETARIO,
+      vehiculos: [{
+        placa: 'PRB123', marca: 'Marca', modelo: 'Modelo', anio: 2024,
+        capacidad: 4, tipoVehiculo: 'SUV', idPuntoRecogida: 7, idPuntoEntrega: 8,
+        fotos: ['https://example.com/foto.jpg'],
+        tarjetaPropiedad: 'https://example.com/tarjeta.jpg',
+      }],
+    })).rejects.toThrow('Selecciona puntos de recogida y entrega activos.');
+    expect(connection.rollback).toHaveBeenCalled();
+    expect(auth.eliminarCuenta).toHaveBeenCalledWith('firebase-uid');
+    expect(connection.execute).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO vehiculo'), expect.anything(),
+    );
+  });
+
+  it('permite perfil sin imagen ni dirección inventadas según el esquema', async () => {
+    await service.registroInicial({
+      ...registration,
+      persona: { ...registration.persona, direccion: undefined, fotoPerfil: undefined },
+    });
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO persona'),
+      expect.arrayContaining([null, '']),
+    );
+  });
+
   it('deshace TiDB y elimina el UID si falla el registro', async () => {
     connection.execute.mockRejectedValueOnce({ code: 'ER_DUP_ENTRY' });
     await expect(service.registroInicial(registration)).rejects.toBeInstanceOf(ConflictException);
@@ -91,6 +151,16 @@ describe('PersonasService', () => {
       throw new ServiceUnavailableException('textbee no configurado');
     });
     await expect(service.registroInicial(registration)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(auth.crearCuenta).not.toHaveBeenCalled();
+    expect(database.getConnection).not.toHaveBeenCalled();
+  });
+
+  it('no duplica correos de personas anteriores aunque el esquema no tenga UNIQUE(email)', async () => {
+    database.execute.mockResolvedValueOnce([[{ idPersona: 9 }]]);
+    await expect(service.registroInicial(registration)).rejects.toBeInstanceOf(ConflictException);
+    expect(database.execute).toHaveBeenCalledWith(
+      expect.stringContaining('LOWER(email) = LOWER(?)'), ['ada@example.com'],
+    );
     expect(auth.crearCuenta).not.toHaveBeenCalled();
     expect(database.getConnection).not.toHaveBeenCalled();
   });
@@ -115,8 +185,10 @@ describe('PersonasService', () => {
 
   it('incluye el rol administrador activo en el perfil del cliente', async () => {
     database.execute.mockResolvedValueOnce([[{ idPersona: 42, nombre: 'Ada' }]])
-      .mockResolvedValueOnce([[{ cliente: 1, propietario: 0, conductor: 0, administrador: 1 }]]);
+      .mockResolvedValueOnce([[{ cliente: 1, propietario: 0, conductor: 0, administrador: 1 }]])
+      .mockResolvedValueOnce([[{ estado: 'Vigente' }]]);
     expect(await service.obtenerPerfil(42)).toMatchObject({
+      licenciaEstado: 'Vigente',
       roles: { cliente: true, propietario: false, conductor: false, administrador: true },
     });
   });
