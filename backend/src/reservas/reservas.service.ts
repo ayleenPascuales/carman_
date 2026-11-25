@@ -4,13 +4,15 @@ import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { CrearReservaDto } from './dto/crearReserva.dto';
 import { RespuestaConductorDTO } from './dto/respuestaConductor.dto';
 import { DecisionSinConductorDTO } from './dto/desicionSinConductor.dto';
+import { PagosService } from '../pagos/pagos.service';
 
 @Injectable()
 export class ReservasService {
 
     constructor(
         @Inject('DATABASE_CONNECTION')
-        private readonly database: Pool) {
+        private readonly database: Pool,
+        private readonly pagosService: PagosService) {
 
     }
 
@@ -30,12 +32,18 @@ export class ReservasService {
 
         const [vehiculos] = await this.database.query<RowDataPacket[]>(
             `SELECT idVehiculo, estado, estado_solicitud_revision,
-            idPuntoRecogida, idPuntoEntrega FROM vehiculo WHERE idVehiculo = ?`, [idVehiculo]
+            idPuntoRecogida, idPuntoEntrega, precioPorDia 
+            FROM vehiculo WHERE idVehiculo = ?`, [idVehiculo]
         );
         if (vehiculos.length === 0) {
             throw new NotFoundException('El vehiculo no existe. ')
         }
         const vehiculo = vehiculos[0];
+        if (vehiculo.precioPorDia === null || vehiculo.precioPorDia === undefined ||
+            !Number.isFinite(Number(vehiculo.precioPorDia))
+            || Number(vehiculo.precioPorDia) <= 0) {
+            throw new BadRequestException('El vehiculo no tiene un precio de alquiler válido.');
+        }
         if (vehiculo.estado !== 'Activo') {
             throw new BadRequestException('El vehiculo no está disponible para reservar.');
         }
@@ -83,6 +91,15 @@ export class ReservasService {
                 'La fecha y hora de finalizacion deben ser posteriores al inicio. '
             );
         }
+        const fechaInicio = new Date(
+            `${dto.fechaInicioServicio}T00:00:00`
+        );
+        const fechaFin = new Date(
+            `${dto.fechaFinServicio}T00:00:00`
+        );
+        const cantidadDias = Math.ceil((fechaFin.getTime() - fechaInicio.getTime())
+            / (1000 * 60 * 60 * 24));
+        const precioEstimado = (vehiculo.precioPorDia) * cantidadDias
 
         const [reservasExistentes] = await this.database.query<RowDataPacket[]>(
             `SELECT idReserva FROM reserva WHERE idVehiculo = ?
@@ -123,6 +140,9 @@ export class ReservasService {
                 idConductor = Number(conductores[0].idConductor);
             }
         }
+        const estadoReserva = dto.solicitarConductor === true
+            ? 'Pendiente'
+            : 'Confirmada';
 
         const [resultado] = await this.database.query<ResultSetHeader>(
             `INSERT INTO reserva(
@@ -134,10 +154,11 @@ export class ReservasService {
             fechaFinServicio,
             horaFinServicio,
             estado,
+            precioEstimado,
             idPuntoRecogida,
             idPuntoEntrega,
             estadoRespuestaConductor
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 idCliente,
                 idVehiculo,
@@ -146,7 +167,8 @@ export class ReservasService {
                 horaInicio,
                 dto.fechaFinServicio,
                 horaFin,
-                'Pendiente',
+                estadoReserva,
+                precioEstimado,
                 vehiculo.idPuntoRecogida,
                 vehiculo.idPuntoEntrega,
                 idConductor !== null
@@ -157,7 +179,7 @@ export class ReservasService {
         return {
             mensaje: 'Solicitud de reserva creada correctamente.',
             idReserva: resultado.insertId,
-            estado: 'Pendiente',
+            estado: 'estadoReserva',
             requiereDecisionConductor:
                 dto.solicitarConductor === true && idConductor === null
         };
@@ -189,7 +211,9 @@ export class ReservasService {
                 fechaInicioServicio,
                 horaInicioServicio,
                 fechaFinServicio,
-                horaFinServicio
+                horaFinServicio,
+                DATEDIFF(fechaFinServicio, fechaInicioServicio) AS cantidadDias,
+                precioEstimado
                 FROM reserva WHERE idReserva = ? FOR UPDATE`, [idReserva],
             );
             if (reservas.length === 0) {
@@ -204,9 +228,21 @@ export class ReservasService {
                 throw new BadRequestException('Esta reserva ya no esta pendiente de respuesta. ');
             }
             if (dto.aceptar) {
+
+                const cantidadDias = Math.max(1, Number(reserva.cantidadDias));
+                const precioConductor = 70000 * cantidadDias;
+                const precioActual = Number(reserva.precioEstimado);
+                if (reserva.precioEstimado === null ||
+                    reserva.precioEstimado === undefined ||
+                    !Number.isFinite(precioActual)) {
+                    throw new BadRequestException('La reserva no tiene un precio estimado.')
+                }
+                const nuevoPrecioEstimado = precioActual + precioConductor;
+
                 await connection.query(
-                    `UPDATE reserva SET estadoRespuestaConductor = 'Aceptada'
-                    WHERE idReserva = ?`, [idReserva],
+                    `UPDATE reserva SET estadoRespuestaConductor = 'Aceptada',
+                    precioEstimado = ? WHERE idReserva = ?`,
+                    [nuevoPrecioEstimado, idReserva],
                 );
                 await connection.commit();
                 return {
@@ -215,6 +251,7 @@ export class ReservasService {
                     idConductor,
                     estado: 'Pendiente',
                     estadoRespuestaConductor: 'Aceptada',
+                    precioEstimado: nuevoPrecioEstimado,
                 };
             }
             let rechazados: number[] = [];

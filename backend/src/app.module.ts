@@ -13,6 +13,7 @@ import { CalificacionesModule } from './calificaciones/calificaciones.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ArchivosModule } from './archivos/archivos.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     CalificacionesModule,
     AuthModule,
     AdminModule,
+    ArchivosModule,
   ],
   controllers: [AppController],
   providers: [AppService],

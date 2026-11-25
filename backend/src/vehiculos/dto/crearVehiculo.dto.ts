@@ -1,4 +1,4 @@
-import { ArrayNotEmpty, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength, Min, } from "class-validator";
+import { ArrayNotEmpty, IsArray, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, MaxLength, Min, } from "class-validator";
 
 
 export class CrearVehiculoDto {
@@ -30,6 +30,10 @@ export class CrearVehiculoDto {
     @IsNotEmpty()
     @MaxLength(50)
     tipoVehiculo: string;
+
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(1)
+    precioPorDia: number;
 
     @IsInt()
     @Min(1)

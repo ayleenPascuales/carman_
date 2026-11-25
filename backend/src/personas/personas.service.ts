@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException, ConflictException, NotFoundExc
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import * as bcrypt from 'bcrypt';
 import { RegistroInicialDto, Rol } from './dto/registroInicial.dto';
-import { AgregarRolDto, RolAdicional } from './dto/agregarRol.dto';
+import { AgregarRolDto } from './dto/agregarRol.dto';
 import { CrearLicenciaDto } from './dto/crearLicencia.dto';
 import { AuthService } from '../auth/auth.service';
 import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
@@ -179,12 +179,13 @@ export class PersonasService {
                             anio,
                             capacidad,
                             tipoVehiculo,
+                            precioPorDia,
                             fotos,
                             descripcion,
                             idPuntoRecogida,
                             idPuntoEntrega,
                             tarjetaPropiedad
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             idPropietario,
                             vehiculo.placa,
@@ -193,6 +194,7 @@ export class PersonasService {
                             vehiculo.anio,
                             vehiculo.capacidad,
                             vehiculo.tipoVehiculo,
+                            vehiculo.precioPorDia,
                             JSON.stringify(vehiculo.fotos),
                             vehiculo.descripcion ?? null,
                             vehiculo.idPuntoRecogida,
@@ -246,112 +248,87 @@ export class PersonasService {
     }
 
     async agregarRol(idPersona: number, dto: AgregarRolDto) {
-        const esCliente = dto.roles === RolAdicional.CLIENTE;
-        const esConductor = dto.roles === RolAdicional.CONDUCTOR;
-        const esPropietario = dto.roles === RolAdicional.PROPIETARIO;
-
-        if (esPropietario && (!dto.vehiculos || dto.vehiculos.length === 0)) {
-            throw new BadRequestException(
-                'Para ser propietario debes añadir por lo menos un vehiculo. ',
-            );
-        }
-        if (!esPropietario && dto.vehiculos?.length) {
-            throw new BadRequestException(
-                'Solo el propietario puede registrar vehiculos. ',
-            );
-        }
-
         const connection = await this.database.getConnection();
+
         try {
             await connection.beginTransaction();
-
             const [personas] = await connection.execute<RowDataPacket[]>(
-                `SELECT idPersona FROM persona WHERE idPersona = ? FOR UPDATE`, [idPersona],
+                `SELECT idPersona FROM persona WHERE idPersona = ? FOR UPDATE`, [idPersona]
             );
             if (personas.length === 0) {
                 throw new NotFoundException('El usuario no existe. ')
             }
-
-            const tablaRol = esCliente ? 'cliente'
-                : esConductor ? 'conductor'
-                    : 'propietario';
-
-            const [rolesExistentes] = await connection.execute<RowDataPacket[]>(
-                `SELECT idPersona FROM ${tablaRol} WHERE idPersona = ?`, [idPersona],
+            const [conductores] = await connection.execute<RowDataPacket[]>(
+                `SELECT idConductor FROM conductor WHERE idPersona = ?`, [idPersona]
             );
-            if (rolesExistentes.length > 0) {
-                throw new ConflictException(
-                    'El usuario ya tiene este rol registrado. '
-                );
+            if (conductores.length > 0) {
+                throw new ConflictException('El usuario ya tiene registrado el rol de conductor. ');
             }
-
             const [licencias] = await connection.execute<RowDataPacket[]>(
-                `SELECT idLicencia, numeroDocumento, estado, 
-                DATE_FORMAT(fechaExpiracion, '%Y-%m-%d') AS fechaExpiracion
-                FROM  licencia WHERE idPersona = ? LIMIT 1 FOR UPDATE`, [idPersona],);
-
+                `SELECT 
+            idLicencia,
+            numeroDocumento, 
+            estado,
+            DATE_FORMAT(fechaExpiracion, '%Y-%m-%d') AS fechaExpiracion
+            FROM licencia WHERE idPersona = ? LIMIT 1 FOR UPDATE`, [idPersona]
+            );
             const licenciaExistente = licencias[0];
             let licenciaVigente = false;
-
             if (licenciaExistente) {
-                const fechaExpiracion = new Date(`${(licenciaExistente.fechaExpiracion).slice(0, 10)}T00:00:00`);
+                const fechaExpiracion = new Date(
+                    `${licenciaExistente.fechaExpiracion}T00:00:00`
+                );
                 const hoy = new Date();
                 hoy.setHours(0, 0, 0, 0);
-                licenciaVigente = licenciaExistente.estado === 'Vigente' && fechaExpiracion >= hoy;
+
+                licenciaVigente = licenciaExistente.estado === 'Vigente'
+                    && fechaExpiracion >= hoy;
+                if (licenciaExistente.estado === 'Suspendida') {
+                    throw new BadRequestException(
+                        'Tu licencia esta suspendida. Contacta con la administracion de CARMAN.'
+                    );
+                }
             }
-            if (licenciaExistente?.estado === 'Suspendida' && dto.licencia) {
+            if (!licenciaVigente && !dto.licencia) {
                 throw new BadRequestException(
-                    'Tu licencia esta suspendida. Contacta con la administracion de CARMAN para autorizar el registro de una nueva licencia valida. '
+                    'Para convertir en conductor necesitas registrar una licencia vigente.'
                 );
             }
-
-            if (esConductor && !licenciaVigente && !dto.licencia) {
-                throw new BadRequestException(
-                    'Para ser conductor necesitas tener la licencia vigente. ',
+            if (!licenciaVigente && dto.licencia) {
+                const fechaExpiracion = new Date(
+                    `${dto.licencia.fechaExpiracion}T00:00:00`
                 );
-            }
-
-            if (dto.licencia) {
-                const fechaExpiracion = new Date(`${dto.licencia.fechaExpiracion}T00:00:00`,);
                 const hoy = new Date();
                 hoy.setHours(0, 0, 0, 0);
 
                 if (fechaExpiracion < hoy) {
-                    throw new BadRequestException(
-                        'No puedes registrar una licencia vencida. '
-                    )
+                    throw new BadRequestException('No puedes registrar una licencia vencida.');
+                }
+                const [licenciasRegistradas] = await connection.execute<RowDataPacket[]>(
+                    `SELECT idLicencia FROM licencia WHERE numeroDocumento = ?
+                    AND idPersona <> ?`, [dto.licencia.numeroDocumento, idPersona]
+                );
+                if (licenciasRegistradas.length > 0) {
+                    throw new ConflictException('Esta licencia ya se encuentra registrada. ');
                 }
                 if (licenciaExistente) {
-                    const [licenciasRegistradas] = await connection.execute<RowDataPacket[]>(
-                        `SELECT idLicencia FROM licencia WHERE numeroDocumento = ? AND idLicencia <> ?`
-                        , [dto.licencia.numeroDocumento, licenciaExistente.idLicencia,],
-                    );
-                    if (licenciasRegistradas.length > 0) {
-                        throw new ConflictException('Esta licencia ya se encuentra registrada. ');
-                    }
-                    const nuevoEstado = licenciaExistente.estado === 'Suspendida'
-                        ? 'Suspendida' : 'Vigente';
-
                     await connection.execute(
-                        `UPDATE licencia SET numeroDocumento = ?, fechaExpiracion = ?,
-                        estado = ?, tipoLicencia = ?, fotoLicencia = ?
+                        `UPDATE licencia SET 
+                        numeroDocumento = ?,
+                        fechaExpiracion = ?,
+                        estado = 'Vigente',
+                        tipoLicencia = ?,
+                        fotoLicencia = ?
                         WHERE idLicencia = ?`,
                         [
                             dto.licencia.numeroDocumento,
                             dto.licencia.fechaExpiracion,
-                            nuevoEstado,
                             dto.licencia.tipoLicencia,
                             dto.licencia.fotoLicencia,
-                            licenciaExistente.idLicencia,
-                        ],
+                            licenciaExistente.idLicencia
+                        ]
                     );
                 } else {
-                    const [licenciasRegistradas] = await connection.execute<RowDataPacket[]>(
-                        `SELECT idLicencia FROM licencia WHERE numeroDocumento = ?`, [dto.licencia.numeroDocumento],
-                    );
-                    if (licenciasRegistradas.length > 0) {
-                        throw new ConflictException('Esta licencia ya se encuentra registrada. ');
-                    }
                     await connection.execute(
                         `INSERT INTO licencia(
                         idPersona,
@@ -367,81 +344,35 @@ export class PersonasService {
                             dto.licencia.fechaExpiracion,
                             dto.licencia.tipoLicencia,
                             dto.licencia.fotoLicencia
-                        ],
+
+                        ]
                     );
                 }
             }
-
-            let idPropietario: number | undefined;
-
-            if (esCliente) {
-                await connection.execute(
-                    `INSERT INTO cliente (idPersona) VALUES (?)`, [idPersona],
-                );
-            }
-            if (esConductor) {
-                await connection.execute(
-                    `INSERT INTO conductor (idPersona) VALUES (?)`, [idPersona],
-                );
-            }
-            if (esPropietario) {
-                const [resultadoPropietario] = await connection.execute<ResultSetHeader>(
-                    `INSERT INTO propietario (idPersona) VALUES (?)`, [idPersona],
-                );
-                idPropietario = resultadoPropietario.insertId;
-            }
-            if (esPropietario && idPropietario !== undefined) {
-                for (const vehiculo of dto.vehiculos!) {
-                    await connection.execute(
-                        `INSERT INTO vehiculo (
-                        idPropietario,
-                        placa,
-                        marca,
-                        modelo,
-                        anio,
-                        capacidad,
-                        tipoVehiculo,
-                        fotos,
-                        descripcion,
-                        idPuntoRecogida,
-                        idPuntoEntrega,
-                        tarjetaPropiedad
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [
-                            idPropietario,
-                            vehiculo.placa,
-                            vehiculo.marca,
-                            vehiculo.modelo,
-                            vehiculo.anio,
-                            vehiculo.capacidad,
-                            vehiculo.tipoVehiculo,
-                            JSON.stringify(vehiculo.fotos),
-                            vehiculo.descripcion ?? null,
-                            vehiculo.idPuntoRecogida,
-                            vehiculo.idPuntoEntrega,
-                            vehiculo.tarjetaPropiedad,
-                        ],
-                    );
-                }
-            }
-
+            const [resultado] = await connection.execute<ResultSetHeader>(
+                `INSERT INTO conductor (idPersona) VALUES (?)`, [idPersona]
+            );
             await connection.commit();
             return {
-                mensaje: 'Rol agregado correctamente. ', idPersona, rol: dto.roles,
+                mensaje: 'Ya eres un conductor para CARMAN!',
+                idPersona,
+                idConductor: resultado.insertId,
+                rol: 'Conductor'
             };
         } catch (error) {
             await connection.rollback();
-
-            if (error && typeof error === 'object' && 'code' in error &&
-                error.code === 'ER_DUP_ENTRY') {
+            if (error && typeof error === 'object'
+                && 'code' in error && error.code === 'ER_DUP_ENTRY'
+            ) {
                 throw new ConflictException(
-                    'La licencia, placa o rol ya se encuentran registrados.',
+                    'La licencia o el rol de conductor ya se encuentran registrados. '
                 );
             }
             throw error;
         } finally {
             connection.release();
         }
+
     }
 
     async crearLicencia(idPersona: number, dto: CrearLicenciaDto) {
@@ -653,7 +584,7 @@ export class PersonasService {
             ] as const;
 
             const actualizaciones: string[] = [];
-            const valores: (string)[] = [];
+            const valores: any[] = [];
             for (const campo of campos) {
                 const valor = dto[campo];
                 if (valor !== undefined) {

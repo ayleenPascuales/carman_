@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createPool } from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { config } from 'process';
+
 
 @Module({
     providers: [
