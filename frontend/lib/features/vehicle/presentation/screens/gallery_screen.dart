@@ -139,6 +139,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
             final photos = _photos(vehicle);
             final favorite = ref
                 .watch(favoritesControllerProvider)
+                .ids
                 .contains(vehicle.id);
             return SafeArea(
               child: Column(
@@ -192,9 +193,19 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                               ? Icons.favorite_rounded
                               : Icons.favorite_border_rounded,
                           color: favorite ? AppColors.error : Colors.white,
-                          onPressed: () => ref
-                              .read(favoritesControllerProvider.notifier)
-                              .toggle(vehicle.id),
+                          onPressed: () async {
+                            final saved = await ref
+                                .read(favoritesControllerProvider.notifier)
+                                .toggle(vehicle.id);
+                            if (!saved && context.mounted) {
+                              showCarmanSnack(
+                                context,
+                                ref.read(favoritesControllerProvider).error ??
+                                    'Inicia sesión para guardar favoritos.',
+                                kind: SnackKind.warning,
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),

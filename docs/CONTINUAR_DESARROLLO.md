@@ -5,6 +5,20 @@ certificación de funcionamiento integral ni una autorización para migrar datos
 
 ## Último despliegue
 
+M6 favoritos se publicó en Production (`dpl_69RE9SpsRwSKkhQuJ8oG8eDCs9b6`)
+después de que el usuario confirmara la creación de la tabla `favorito` en
+TiDB. Smoke: web, salud y catálogo 200; ruta de favoritos sin token 401.
+No se ejecutó ninguna migración ni escritura de ensayo en `carmandb`
+desde este proyecto. Falta probar permisos SQL y recorridos autenticados
+con cuentas de ensayo. Ver
+[AVANCE_FASE4_M6_FAVORITOS.md](AVANCE_FASE4_M6_FAVORITOS.md).
+
+El ajuste posterior para no descargar fotografías de `example.com` está
+publicado en Production como `dpl_5DkwW2uzJ4ZEoC3ncBPvxfciw45C`
+(`boris`: `10d2ab3`). Web, salud y catálogo respondieron HTTP 200.
+El corte M6 todavía no estaba desplegado cuando se hizo esta verificación
+anterior; su migración `004` se había aplicado solo a `carman_ensayo`.
+
 Por autorización explícita se publicó el corte local en Production
 (`dpl_85wj6E7PaFpnzL124qFpUyvkr6Ny`), sin migrar `carmandb`.
 Smoke: web, salud y catálogo HTTP 200; cinco rutas privadas sin token 401.

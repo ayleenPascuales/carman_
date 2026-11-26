@@ -670,6 +670,12 @@ que se puede elegir al iniciar fase 4.
 
 #### M6 — Capacidades opcionales posteriores
 
+**Corte posterior:** favoritos sincronizados desplegados después de que
+el usuario confirmara la creación de la tabla en TiDB; falta verificación
+autenticada y no se ejecutó migración automatizada en `carmandb`. Ver
+[AVANCE_FASE4_M6_FAVORITOS.md](AVANCE_FASE4_M6_FAVORITOS.md).
+Los puntos de auditoría anteriores describen el estado previo a este corte.
+
 1. **Delimitar producto/datos:** contratos y firmas, favoritos sincronizados,
    liquidaciones/comisiones, revisión humana de licencias, chat/soporte y
    GPS voluntario. Hoy no tienen backend completo equivalente.

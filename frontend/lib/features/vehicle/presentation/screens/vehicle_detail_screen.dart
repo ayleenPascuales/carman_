@@ -88,6 +88,7 @@ class _VehicleDetailScreenState extends ConsumerState<VehicleDetailScreen> {
     final catalog = ref.watch(catalogControllerProvider);
     final favorite = ref
         .watch(favoritesControllerProvider)
+        .ids
         .contains(widget.vehicleId);
 
     return Scaffold(
@@ -180,9 +181,19 @@ class _VehicleDetailScreenState extends ConsumerState<VehicleDetailScreen> {
                             color: favorite
                                 ? AppColors.error
                                 : AppColors.onSurface,
-                            onPressed: () => ref
-                                .read(favoritesControllerProvider.notifier)
-                                .toggle(vehicle.id),
+                            onPressed: () async {
+                              final saved = await ref
+                                  .read(favoritesControllerProvider.notifier)
+                                  .toggle(vehicle.id);
+                              if (!saved && context.mounted) {
+                                showCarmanSnack(
+                                  context,
+                                  ref.read(favoritesControllerProvider).error ??
+                                      'Inicia sesión para guardar favoritos.',
+                                  kind: SnackKind.warning,
+                                );
+                              }
+                            },
                           ),
                         ],
                       ),
@@ -481,7 +492,9 @@ class _TitleCard extends StatelessWidget {
         else
           RatingBadge(
             rating: vehicle.rating,
-            count: AppConfig.useLiveApi ? vehicle.reviewCount : vehicle.tripCount,
+            count: AppConfig.useLiveApi
+                ? vehicle.reviewCount
+                : vehicle.tripCount,
           ),
       ],
     );

@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
 import '../../../../data/models/vehicle.dart';
 import '../../../../data/models/vehicle_query.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/carman_image.dart';
 import '../../../../shared/widgets/responsive_layout.dart';
 import '../../../../shared/widgets/status_badge.dart';
@@ -28,6 +29,7 @@ class VehicleCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isFavorite = ref
         .watch(favoritesControllerProvider)
+        .ids
         .contains(vehicle.id);
     final price = mode == RentalMode.hourly
         ? vehicle.pricePerHour
@@ -109,9 +111,19 @@ class VehicleCard extends ConsumerWidget {
                         right: 10,
                         top: 10,
                         child: GestureDetector(
-                          onTap: () => ref
-                              .read(favoritesControllerProvider.notifier)
-                              .toggle(vehicle.id),
+                          onTap: () async {
+                            final saved = await ref
+                                .read(favoritesControllerProvider.notifier)
+                                .toggle(vehicle.id);
+                            if (!saved && context.mounted) {
+                              showCarmanSnack(
+                                context,
+                                ref.read(favoritesControllerProvider).error ??
+                                    'Inicia sesión para guardar favoritos.',
+                                kind: SnackKind.warning,
+                              );
+                            }
+                          },
                           child: Container(
                             width: 32,
                             height: 32,
@@ -132,16 +144,17 @@ class VehicleCard extends ConsumerWidget {
                         ),
                       ),
                       if (!AppConfig.useLiveApi || vehicle.reviewCount > 0)
-                      Positioned(
-                        left: 10,
-                        bottom: 10,
-                        child: RatingBadge(
-                          rating: vehicle.rating,
-                          count: AppConfig.useLiveApi
-                              ? vehicle.reviewCount : vehicle.tripCount,
-                          compact: true,
+                        Positioned(
+                          left: 10,
+                          bottom: 10,
+                          child: RatingBadge(
+                            rating: vehicle.rating,
+                            count: AppConfig.useLiveApi
+                                ? vehicle.reviewCount
+                                : vehicle.tripCount,
+                            compact: true,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   Padding(

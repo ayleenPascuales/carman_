@@ -8,6 +8,7 @@ import 'data/models/vehicle.dart';
 import 'data/remote/api_client.dart';
 import 'data/repositories/admin_repository.dart';
 import 'data/repositories/api_booking_repository.dart';
+import 'data/repositories/api_favorites_repository.dart';
 import 'data/repositories/api_notification_repository.dart';
 import 'data/repositories/api_payment_history_repository.dart';
 import 'data/repositories/api_profile_repository.dart';
@@ -31,34 +32,41 @@ final sessionStoreProvider = Provider<SessionStore>(
   (ref) => SessionStore(ref.watch(sharedPreferencesProvider)),
 );
 
+final favoritesRepositoryProvider = Provider<ApiFavoritesRepository>(
+  (ref) => ApiFavoritesRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sessionStoreProvider),
+  ),
+);
+
 final apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient();
   ref.onDispose(client.dispose);
   return client;
 });
 
-final paymentHistoryProvider = FutureProvider<List<PaymentHistoryEntry>>(
-  (ref) {
-    final id = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
-    if (id == null) return Future.value(const <PaymentHistoryEntry>[]);
-    return ApiPaymentHistoryRepository(
-      ref.watch(apiClientProvider),
-      ref.watch(sessionStoreProvider),
-    ).fetch();
-  },
+final paymentHistoryProvider = FutureProvider<List<PaymentHistoryEntry>>((ref) {
+  final id = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
+  if (id == null) return Future.value(const <PaymentHistoryEntry>[]);
+  return ApiPaymentHistoryRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sessionStoreProvider),
+  ).fetch();
+});
+
+final tripMapRepositoryProvider = Provider<ApiTripMapRepository>(
+  (ref) => ApiTripMapRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sessionStoreProvider),
+  ),
 );
 
-final tripMapRepositoryProvider = Provider<ApiTripMapRepository>((ref) =>
-    ApiTripMapRepository(
-      ref.watch(apiClientProvider),
-      ref.watch(sessionStoreProvider),
-    ));
-
-final tripPaymentRepositoryProvider = Provider<ApiTripPaymentRepository>((ref) =>
-    ApiTripPaymentRepository(
-      ref.watch(apiClientProvider),
-      ref.watch(sessionStoreProvider),
-    ));
+final tripPaymentRepositoryProvider = Provider<ApiTripPaymentRepository>(
+  (ref) => ApiTripPaymentRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sessionStoreProvider),
+  ),
+);
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   if (AppConfig.useLiveApi) {

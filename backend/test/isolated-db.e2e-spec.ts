@@ -17,6 +17,8 @@ import { NotificacionesService } from '../src/notificaciones/notificaciones.serv
 import { PagosService } from '../src/pagos/pagos.service';
 import { ReservasController } from '../src/reservas/reservas.controller';
 import { ReservasService } from '../src/reservas/reservas.service';
+import { FavoritosController } from '../src/vehiculos/favoritos.controller';
+import { FavoritosService } from '../src/vehiculos/favoritos.service';
 import { VehiculosController } from '../src/vehiculos/vehiculos.controller';
 import { VehiculosService } from '../src/vehiculos/vehiculos.service';
 
@@ -105,10 +107,11 @@ suite('HTTP y SQL reales en MySQL local de ensayo', () => {
     [aceptado, rechazado, publicado] = vehiculos;
 
     const module = await Test.createTestingModule({
-      controllers: [AdminController, HealthController, VehiculosController, ReservasController],
+      controllers: [AdminController, HealthController, FavoritosController,
+        VehiculosController, ReservasController],
       providers: [
         AdminService, AuthService, AuthGuard, AdminGuard, VehiculosService,
-        ReservasService,
+        ReservasService, FavoritosService,
         { provide: 'DATABASE_CONNECTION', useValue: db },
         { provide: ConfigService, useValue: {} },
         { provide: VerificationService, useValue: {} },
@@ -212,6 +215,32 @@ suite('HTTP y SQL reales en MySQL local de ensayo', () => {
       .expect(200);
     expect(available.body.vehiculos.some((v: { idVehiculo: number }) =>
       v.idVehiculo === publicado)).toBe(true);
+  });
+
+  it('sincroniza favoritos propios sin publicar vehículos inactivos', async () => {
+    const endpoint = `/vehiculos/favoritos/${publicado}`;
+    const clientAuth = { Authorization: 'Bearer client' };
+    await request(app.getHttpServer()).get('/vehiculos/favoritos').expect(401);
+    await request(app.getHttpServer()).post(endpoint)
+      .set(clientAuth).expect(201);
+    await request(app.getHttpServer()).post(endpoint)
+      .set(clientAuth).expect(201);
+    const first = await request(app.getHttpServer()).get('/vehiculos/favoritos?pagina=1')
+      .set(clientAuth).expect(200);
+    expect(first.body.ids).toEqual([publicado]);
+    expect(first.body.hayMas).toBe(false);
+    const other = await request(app.getHttpServer()).get('/vehiculos/favoritos')
+      .set('Authorization', 'Bearer admin2').expect(200);
+    expect(other.body.ids).toEqual([]);
+    await request(app.getHttpServer()).post(`/vehiculos/favoritos/${rechazado}`)
+      .set(clientAuth).expect(404);
+    await request(app.getHttpServer()).get('/vehiculos/favoritos?pagina=0')
+      .set(clientAuth).expect(400);
+    await request(app.getHttpServer()).delete(endpoint).set(clientAuth).expect(200);
+    await request(app.getHttpServer()).delete(endpoint).set(clientAuth).expect(200);
+    const empty = await request(app.getHttpServer()).get('/vehiculos/favoritos')
+      .set(clientAuth).expect(200);
+    expect(empty.body.ids).toEqual([]);
   });
 
   it('exige licencia y serializa dos reservas sobre el mismo vehículo', async () => {
