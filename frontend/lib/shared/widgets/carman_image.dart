@@ -2,6 +2,16 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme/app_colors.dart';
 
+bool _isExampleImage(String path) {
+  final host = Uri.tryParse(path)?.host.toLowerCase();
+  if (host == null) return false;
+  return const [
+    'example.com',
+    'example.org',
+    'example.net',
+  ].any((domain) => host == domain || host.endsWith('.$domain'));
+}
+
 /// Handles both bundled assets (demo catalogue) and remote URLs (API
 /// catalogue) with a branded fallback when a photograph is unavailable.
 class CarmanImage extends StatelessWidget {
@@ -22,7 +32,7 @@ class CarmanImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = path.isEmpty
+    final image = path.isEmpty || _isExampleImage(path)
         ? _fallback()
         : path.startsWith('http')
         ? Image.network(
