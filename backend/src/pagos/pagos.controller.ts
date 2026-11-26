@@ -1,4 +1,4 @@
-import { Controller, Post, Param, ParseIntPipe, UseGuards, Req, Body, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Param, Get, ParseIntPipe, UseGuards, Req, Body, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { PagosService } from './pagos.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { WompiService } from './wompi.service';
@@ -38,6 +38,12 @@ export class PagosController {
         }
 
         return this.pagosService.procesarEventoWompi(evento);
+    }
+
+    @UseGuards(AuthGuard)
+    @Get('historial')
+    obtenerHistorialPagos(@Req() request: SolicitudAutenticada) {
+        return this.pagosService.obtenerHistorialPagos(request.user.idPersona,);
     }
 
 

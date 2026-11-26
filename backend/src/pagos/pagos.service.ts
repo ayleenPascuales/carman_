@@ -729,4 +729,100 @@ export class PagosService {
             );
         }
     }
+
+
+    async obtenerHistorialPagos(idPersona: number) {
+        const [pagos] = await this.db.query<RowDataPacket[]>(
+            `SELECT
+            p.idPago,
+            p.monto,
+            p.fechaHoraPago,
+            p.estado AS estadoPago,
+            p.tipoPago,
+            p.referenciaTransaccion,
+            p.referenciaWompi,
+            p.idTransaccionWompi,
+
+            mp.idMetodoPago,
+            mp.nombre AS metodoPago,
+            mp.proveedor AS proveedorPago,
+
+            op.idOrdenPago,
+            op.fechaHoraEmision,
+            op.total AS totalOrden,
+            op.detalles AS detallesOrden,
+            op.estado AS estadoOrden,
+            op.rutaPdf,
+
+            r.idReserva,
+            r.fechaHoraReserva,
+            r.fechaInicioServicio,
+            r.horaInicioServicio,
+            r.fechaFinServicio,
+            r.horaFinServicio,
+            r.estado AS estadoReserva,
+            r.precioEstimado,
+
+            v.idVehiculo,
+            v.placa,
+            v.marca,
+            v.modelo,
+            v.anio,
+            v.tipoVehiculo,
+            v.capacidad,
+            v.descripcion AS descripcionVehiculo,
+            v.fotos AS fotosVehiculo,
+
+            prop.idPropietario,
+            personaPropietario.nombre AS nombrePropietario,
+            personaPropietario.apellido AS apellidoPropietario,
+
+            con.idConductor,
+            personaConductor.nombre AS nombreConductor,
+            personaConductor.apellido AS apellidoConductor,
+
+            puntoRecogida.nombre AS nombrePuntoRecogida,
+            puntoRecogida.direccion AS direccionPuntoRecogida,
+
+            puntoEntrega.nombre AS nombrePuntoEntrega,
+            puntoEntrega.direccion AS direccionPuntoEntrega
+
+        FROM pago p
+        INNER JOIN reserva r
+        ON p.idReserva = r.idReserva
+        INNER JOIN cliente c
+        ON r.idCliente = c.idCliente
+        INNER JOIN orden_de_pago op
+        ON p.idOrdenPago = op.idOrdenPago
+        AND p.idReserva = op.idReserva
+        INNER JOIN vehiculo v
+        ON r.idVehiculo = v.idVehiculo
+        INNER JOIN propietario prop
+        ON v.idPropietario = prop.idPropietario
+        INNER JOIN persona personaPropietario
+        ON prop.idPersona = personaPropietario.idPersona
+        LEFT JOIN metodo_pago mp
+        ON p.idMetodoPago = mp.idMetodoPago
+        LEFT JOIN conductor con
+        ON r.idConductor = con.idConductor
+        LEFT JOIN persona personaConductor
+        ON con.idPersona = personaConductor.idPersona
+        LEFT JOIN punto_autorizado puntoRecogida
+        ON r.idPuntoRecogida = puntoRecogida.idPunto
+        LEFT JOIN punto_autorizado puntoEntrega 
+        ON r.idPuntoEntrega = puntoEntrega.idPunto
+        WHERE c.idPersona = ?
+
+        ORDER BY p.fechaHoraPago DESC, p.idPago DESC`,
+            [idPersona],
+        );
+
+        return {
+            mensaje: 'Historial de pagos obtenido correctamente.',
+            totalPagos: pagos.length,
+            pagos,
+        };
+    }
+
+
 }
