@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/user_profile.dart';
 import '../../../data/repositories/auth_repository.dart';
@@ -69,6 +72,15 @@ class AuthController extends Notifier<AuthState> {
   AuthState build() {
     final store = ref.watch(sessionStoreProvider);
     final user = store.loadUser();
+    if (AppConfig.useLiveApi) {
+      if (store.loadToken() != null && store.rememberSession) {
+        unawaited(_restoreLiveSession());
+      }
+      return AuthState(
+        status: AuthStatus.unauthenticated,
+        remember: store.rememberSession,
+      );
+    }
     return AuthState(
       status: user != null
           ? AuthStatus.authenticated
@@ -76,6 +88,25 @@ class AuthController extends Notifier<AuthState> {
       user: user,
       remember: store.rememberSession,
     );
+  }
+
+  Future<void> _restoreLiveSession() async {
+    try {
+      final repository = ref.read(authRepositoryProvider);
+      if (repository is! ApiAuthRepository) return;
+      final session = await repository.restoreSession();
+      if (!ref.mounted || state.isAuthenticated || state.isSubmitting ||
+          state.pendingVerification || session == null) {
+        return;
+      }
+      state = AuthState(
+        status: AuthStatus.authenticated,
+        user: session.user,
+        remember: session.remember,
+      );
+    } catch (_) {
+      // Fallo de red: nunca abrir paneles privados con perfil local sin validar.
+    }
   }
 
   void setRemember(bool value) {
@@ -209,7 +240,7 @@ class AuthController extends Notifier<AuthState> {
     if (status.activated && pending != null) {
       final store = ref.read(sessionStoreProvider);
       await store.saveUser(pending.user);
-      await store.saveToken(pending.token);
+      await store.saveToken(pending.token, persistent: pending.remember);
       await store.setRememberSession(pending.remember);
       _pendingSession = null;
       state = AuthState(

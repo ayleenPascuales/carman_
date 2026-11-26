@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_shadows.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -475,7 +476,13 @@ class _TitleCard extends StatelessWidget {
             ],
           ),
         ),
-        RatingBadge(rating: vehicle.rating, count: vehicle.tripCount),
+        if (AppConfig.useLiveApi && vehicle.reviewCount == 0)
+          Text('Sin reseñas', style: AppTheme.bodySm)
+        else
+          RatingBadge(
+            rating: vehicle.rating,
+            count: AppConfig.useLiveApi ? vehicle.reviewCount : vehicle.tripCount,
+          ),
       ],
     );
   }

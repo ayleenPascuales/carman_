@@ -9,6 +9,7 @@ import { ActualizarPersonaDto } from './dto/actualizarPersona.dto';
 import { ActualizarConductorDto } from './dto/actualizarConductor.dto';
 import { DeliveryError, VerificationService } from '../auth/verification.service';
 import { ReservasService } from '../reservas/reservas.service';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class PersonasService {
@@ -19,6 +20,7 @@ export class PersonasService {
         private readonly authService: AuthService,
         private readonly verification: VerificationService,
         private readonly reservasService: ReservasService,
+        private readonly notificaciones: NotificacionesService,
     ) { }
 
     private async validarPuntosActivos(
@@ -103,6 +105,8 @@ export class PersonasService {
         let uidFirebase: string | undefined;
         let transaccionIniciada = false;
         let registroConfirmado = false;
+        let correoDetalle: string | null = null;
+        let idPersona: number | null = null;
 
         try {
             uidFirebase = await this.authService.crearCuenta(
@@ -149,7 +153,7 @@ export class PersonasService {
                     dto.persona.fotoPerfil ?? '',
                 ],
             );
-            const idPersona = resultadoPersona.insertId;
+            idPersona = resultadoPersona.insertId;
             let idPropietario: number | undefined;
 
             if (esCliente) {
@@ -249,13 +253,15 @@ export class PersonasService {
                 );
                 correoEnviado = true;
             } catch (error) {
+                correoDetalle = error instanceof DeliveryError ? error.message : 'No se pudo enviar el correo de activación.';
                 this.logger.warn(`No se pudo enviar el correo de activación: ${error instanceof DeliveryError ? error.diagnostic : 'ERROR_DESCONOCIDO'
                     }`);
             }
             return {
                 mensaje: 'Cuenta creada. Activa tu correo y solicita el SMS para verificar el teléfono.',
                 idPersona, rol: dto.roles,
-                correoEnviado,
+                correoEnviado: correoEnviado === true,
+                correoDetalle,
                 smsEnviado: false,
             };
 
@@ -289,12 +295,18 @@ export class PersonasService {
 
         } finally {
             connection?.release();
+            if (registroConfirmado && idPersona !== null) {
+                await this.notificaciones.avisarPersona(
+                    idPersona, 'Registro', 'Tu cuenta fue creada. Verifica el correo y el teléfono para activarla.',
+                );
+            }
         }
 
     }
 
     async agregarRol(idPersona: number, dto: AgregarRolDto) {
         const connection = await this.database.getConnection();
+        let rolRegistrado = false;
 
         try {
             await connection.beginTransaction();
@@ -391,64 +403,16 @@ export class PersonasService {
                             dto.licencia.fechaExpiracion,
                             dto.licencia.tipoLicencia,
                             dto.licencia.fotoLicencia
-
-            if (esCliente) {
-                await connection.execute(
-                    `INSERT INTO cliente (idPersona) VALUES (?)`, [idPersona],
-                );
-            }
-            if (esConductor) {
-                await connection.execute(
-                    `INSERT INTO conductor (idPersona) VALUES (?)`, [idPersona],
-                );
-            }
-            if (esPropietario) {
-                const [resultadoPropietario] = await connection.execute<ResultSetHeader>(
-                    `INSERT INTO propietario (idPersona) VALUES (?)`, [idPersona],
-                );
-                idPropietario = resultadoPropietario.insertId;
-            }
-            if (esPropietario && idPropietario !== undefined) {
-                for (const vehiculo of dto.vehiculos!) {
-                    await this.validarPuntosActivos(connection, vehiculo);
-                    await connection.execute(
-                        `INSERT INTO vehiculo (
-                        idPropietario,
-                        placa,
-                        marca,
-                        modelo,
-                        anio,
-                        capacidad,
-                        tipoVehiculo,
-                        precioPorDia,
-                        fotos,
-                        descripcion,
-                        idPuntoRecogida,
-                        idPuntoEntrega,
-                        tarjetaPropiedad
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [
-                            idPropietario,
-                            vehiculo.placa,
-                            vehiculo.marca,
-                            vehiculo.modelo,
-                            vehiculo.anio,
-                            vehiculo.capacidad,
-                            vehiculo.tipoVehiculo,
-                            vehiculo.precioPorDia ?? null,
-                            JSON.stringify(vehiculo.fotos),
-                            vehiculo.descripcion ?? null,
-                            vehiculo.idPuntoRecogida,
-                            vehiculo.idPuntoEntrega,
-                            vehiculo.tarjetaPropiedad,
                         ],
                     );
                 }
             }
+
             const [resultado] = await connection.execute<ResultSetHeader>(
                 `INSERT INTO conductor (idPersona) VALUES (?)`, [idPersona]
             );
             await connection.commit();
+            rolRegistrado = true;
             return {
                 mensaje: 'Ya eres un conductor para CARMAN!',
                 idPersona,
@@ -467,12 +431,18 @@ export class PersonasService {
             throw error;
         } finally {
             connection.release();
+            if (rolRegistrado) {
+                await this.notificaciones.avisarPersona(
+                    idPersona, 'Registro', 'Se agregó el rol de conductor a tu cuenta.',
+                );
+            }
         }
 
     }
 
     async crearLicencia(idPersona: number, dto: CrearLicenciaDto) {
         const connection = await this.database.getConnection();
+        let licenciaRegistrada = false;
 
         try {
             await connection.beginTransaction();
@@ -525,6 +495,7 @@ export class PersonasService {
                 ],
             );
             await connection.commit();
+            licenciaRegistrada = true;
             return {
                 mensaje: 'Licencia registrada correctamente.', idPersona, idLicencia: resultado.insertId,
             };
@@ -542,11 +513,17 @@ export class PersonasService {
 
         } finally {
             connection.release();
+            if (licenciaRegistrada) {
+                await this.notificaciones.avisarPersona(
+                    idPersona, 'Licencia', 'Tu licencia fue registrada.',
+                );
+            }
         }
     }
 
     async actualizarLicencia(idPersona: number, dto: CrearLicenciaDto) {
         const connection = await this.database.getConnection();
+        let licenciaActualizada = false;
 
         try {
             await connection.beginTransaction();
@@ -603,6 +580,7 @@ export class PersonasService {
                 ],
             );
             await connection.commit();
+            licenciaActualizada = true;
             return {
                 mensaje: 'Licencia actualizada correctamente', idPersona, idLicencia,
             };
@@ -622,6 +600,11 @@ export class PersonasService {
 
         } finally {
             connection.release();
+            if (licenciaActualizada) {
+                await this.notificaciones.avisarPersona(
+                    idPersona, 'Licencia', 'Tu licencia fue actualizada.',
+                );
+            }
         }
     }
 
@@ -717,10 +700,15 @@ export class PersonasService {
                 }
             }
             const [personas] = await connection.execute<RowDataPacket[]>(
-                `SELECT idPersona FROM persona WHERE idPersona = ?`, [idPersona]
+                `SELECT idPersona, telefono FROM persona WHERE idPersona = ?`, [idPersona]
             );
             if (personas.length === 0) {
                 throw new NotFoundException('Usuario no encontrado. ')
+            }
+            if (dto.telefono !== undefined && dto.telefono !== personas[0].telefono) {
+                throw new BadRequestException(
+                    'Por seguridad, el cambio de teléfono requiere un flujo de reverificación que aún no está disponible.',
+                );
             }
             await connection.execute(
                 `UPDATE persona SET ${actualizaciones.join(', ')} 
@@ -784,22 +772,36 @@ export class PersonasService {
         }
 
         const reservasAsignadas: number[] = [];
+        let advertencia: string | undefined;
 
         if (debeBuscarConductores) {
-            const resultado = await this.reservasService.buscarYasignarConductor();
+            try {
+                const resultado = await this.reservasService.buscarYasignarConductor();
 
-            reservasAsignadas.push(
-                ...resultado.reservasAsignadas.map(
-                    reserva => reserva.idReserva
-                )
-            );
+                // La búsqueda puede asignar reservas a otros conductores. No
+                // divulgar sus identificadores a quien activó disponibilidad.
+                const [propias] = await this.database.execute<RowDataPacket[]>(
+                    'SELECT idConductor FROM conductor WHERE idPersona = ? LIMIT 1',
+                    [idPersona],
+                );
+                if (propias.length) {
+                    reservasAsignadas.push(...resultado.reservasAsignadas
+                        .filter(reserva => reserva.idConductor === Number(propias[0].idConductor))
+                        .map(reserva => reserva.idReserva));
+                }
+            } catch {
+                // La disponibilidad ya fue confirmada. El cron reintentará
+                // asignaciones; informar error aquí induciría un cambio doble.
+                advertencia = 'Disponibilidad guardada; la búsqueda de servicios se reintentará.';
+            }
         }
 
         return {
             mensaje: 'Disponibilidad actualizada correctamente.',
             idPersona,
             disponibilidad: dto.disponibilidad,
-            reservasAsignadas
+            reservasAsignadas,
+            ...(advertencia ? { advertencia } : {}),
         };
     }
 }

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/constants/app_assets.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -197,9 +198,11 @@ class _LicenseVerificationScreenState
               builder: (context) => AlertDialog(
                 title: const Text('¿Por qué verificamos tu licencia?'),
                 content: Text(
-                  'La normativa exige comprobar que el conductor tiene un permiso vigente. '
-                  'Tus documentos se cifran y solo los revisa el equipo de seguridad de Carman. '
-                  'Nunca se comparten con otros usuarios.',
+                  AppConfig.useLiveApi
+                      ? 'La licencia debe estar vigente. La carga de documentos '
+                        'todavía no está habilitada: no envíes fotos por otros canales.'
+                      : 'La normativa exige comprobar que el conductor tiene un permiso vigente. '
+                        'Esta pantalla muestra un proceso de demostración.',
                   style: AppTheme.bodyMd.copyWith(height: 1.55),
                 ),
                 actions: [
@@ -218,6 +221,20 @@ class _LicenseVerificationScreenState
           ? _ApprovedState(license: license)
           : license.status == LicenseStatus.pendingReview
           ? _PendingState(license: license)
+          : AppConfig.useLiveApi
+          ? EmptyState(
+              title: license.status == LicenseStatus.rejected
+                  ? 'Licencia rechazada'
+                  : license.status == LicenseStatus.expired
+                      ? 'Licencia vencida'
+                      : license.status == LicenseStatus.suspended
+                          ? 'Licencia suspendida'
+                          : 'Licencia no registrada',
+              message: 'La carga segura de licencias aún no está disponible. '
+                  'Tu estado se consulta desde el perfil del servidor.',
+              actionLabel: 'Volver al perfil',
+              onAction: () => context.go('/profile'),
+            )
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 130),
               children: [
@@ -575,9 +592,11 @@ class _ApprovedState extends ConsumerWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            license.approvedAt != null
-                                ? 'Verificado ${AppFormatters.shortDate(license.approvedAt!)} · DGT compliant'
-                                : 'Verificado · DGT compliant',
+                             AppConfig.useLiveApi
+                                 ? 'Estado vigente según tu perfil'
+                                 : license.approvedAt != null
+                                     ? 'Verificado ${AppFormatters.shortDate(license.approvedAt!)}'
+                                     : 'Verificado',
                             style: AppTheme.bodySm.copyWith(fontSize: 10),
                           ),
                         ],
@@ -600,7 +619,7 @@ class _ApprovedState extends ConsumerWidget {
           onPressed: () => context.go('/home'),
         ),
         const SizedBox(height: 8),
-        CarmanButton(
+        if (!AppConfig.useLiveApi) CarmanButton(
           label: 'Actualizar licencia',
           variant: CarmanButtonVariant.outline,
           icon: Icons.upload_file_rounded,
@@ -646,12 +665,14 @@ class _PendingState extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'La revisión tarda menos de 15 minutos.',
+          AppConfig.useLiveApi
+              ? 'El estado de la licencia se consulta en tu perfil.'
+              : 'La revisión tarda menos de 15 minutos.',
           textAlign: TextAlign.center,
           style: AppTheme.bodySm.copyWith(height: 1.5, fontSize: 12),
         ),
         const SizedBox(height: 20),
-        const InfoBanner(
+        if (!AppConfig.useLiveApi) const InfoBanner(
           title: 'Te avisaremos al instante',
           message: 'Recibirás una notificación push y un SMS en cuanto la licencia esté aprobada.',
           icon: Icons.notifications_active_outlined,

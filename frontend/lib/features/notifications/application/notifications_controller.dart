@@ -4,6 +4,7 @@ import '../../../core/errors/app_exception.dart';
 import '../../../data/models/app_notification.dart';
 import '../../../data/models/booking.dart';
 import '../../../providers.dart';
+import '../../auth/application/auth_controller.dart';
 
 class NotificationsState {
   const NotificationsState({
@@ -35,18 +36,23 @@ class NotificationsState {
 class NotificationsController extends Notifier<NotificationsState> {
   @override
   NotificationsState build() {
+    final id = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
+    if (id == null) return const NotificationsState(items: [], isLoading: false);
     Future.microtask(refresh);
     return const NotificationsState();
   }
 
   Future<void> refresh() async {
+    final accountId = ref.read(authControllerProvider).user?.id;
+    if (accountId == null) return;
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final items = await ref
           .read(notificationRepositoryProvider)
           .fetchNotifications();
-      if (!ref.mounted) return;
-      final readIds = ref.read(sessionStoreProvider).loadReadNotifications();
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
+      final readIds = ref.read(sessionStoreProvider)
+          .loadReadNotifications(accountId: accountId);
       state = state.copyWith(
         items: items
             .map(
@@ -58,10 +64,10 @@ class NotificationsController extends Notifier<NotificationsState> {
         isLoading: false,
       );
     } on AppException catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(isLoading: false, error: error.message);
     } catch (_) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(
         isLoading: false,
         error: 'No pudimos cargar tus notificaciones.',
@@ -70,25 +76,48 @@ class NotificationsController extends Notifier<NotificationsState> {
   }
 
   Future<void> markAllRead() async {
+    final accountId = ref.read(authControllerProvider).user?.id;
+    if (accountId == null) return;
+    final previous = state.items;
     final updated = state.items
         .map((item) => item.copyWith(isRead: true))
         .toList();
     state = state.copyWith(items: updated);
-    await ref
-        .read(sessionStoreProvider)
-        .saveReadNotifications(updated.map((item) => item.id).toSet());
-    await ref.read(notificationRepositoryProvider).markAllRead();
+    try {
+      await ref.read(notificationRepositoryProvider).markAllRead();
+      if (ref.read(authControllerProvider).user?.id != accountId) return;
+      await ref.read(sessionStoreProvider).saveReadNotifications(
+        updated.map((item) => item.id).toSet(), accountId: accountId,
+      );
+    } catch (_) {
+      if (ref.mounted && ref.read(authControllerProvider).user?.id == accountId) {
+        state = state.copyWith(items: previous);
+      }
+      rethrow;
+    }
   }
 
   Future<void> markRead(String id) async {
+    final accountId = ref.read(authControllerProvider).user?.id;
+    if (accountId == null) return;
+    final previous = state.items;
     final updated = state.items
         .map((item) => item.id == id ? item.copyWith(isRead: true) : item)
         .toList();
     state = state.copyWith(items: updated);
-    final readIds = ref.read(sessionStoreProvider).loadReadNotifications()
-      ..add(id);
-    await ref.read(sessionStoreProvider).saveReadNotifications(readIds);
-    await ref.read(notificationRepositoryProvider).markRead(id);
+    try {
+      await ref.read(notificationRepositoryProvider).markRead(id);
+      if (ref.read(authControllerProvider).user?.id != accountId) return;
+      final readIds = ref.read(sessionStoreProvider)
+          .loadReadNotifications(accountId: accountId)..add(id);
+      await ref.read(sessionStoreProvider)
+          .saveReadNotifications(readIds, accountId: accountId);
+    } catch (_) {
+      if (ref.mounted && ref.read(authControllerProvider).user?.id == accountId) {
+        state = state.copyWith(items: previous);
+      }
+      rethrow;
+    }
   }
 
   void add(AppNotification notification) {

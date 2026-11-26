@@ -5,6 +5,7 @@ import PDFDocument from 'pdfkit';
 import { WompiService } from './wompi.service';
 import { randomUUID } from 'crypto';
 import type { EventoWompi } from './wompi.service';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 interface ReservaPago extends RowDataPacket {
     idReserva: number;
@@ -36,6 +37,7 @@ interface OrdenCheckout extends RowDataPacket {
 interface PagoWebhook extends RowDataPacket {
     idPago: number;
     idOrdenPago: number;
+    idReserva: number;
     monto: number | string;
     estado: string;
     idTransaccionWompi: string | null;
@@ -58,12 +60,15 @@ export class PagosService {
         @Inject('DATABASE_CONNECTION')
         private readonly db: Pool,
         private readonly archivosService: ArchivosService,
-        private readonly wompiService: WompiService,) { }
+        private readonly wompiService: WompiService,
+        private readonly notificaciones: NotificacionesService,) { }
 
 
     async generarOrdenPago(idPersona: number, idReserva: number) {
         const conexion = await this.db.getConnection();
         let transaccionActiva = false;
+        let conexionLiberada = false;
+        let ordenCreada = false;
 
         try {
             await conexion.beginTransaction();
@@ -102,6 +107,8 @@ export class PagosService {
 
                 await conexion.commit();
                 transaccionActiva = false;
+                conexion.release();
+                conexionLiberada = true;
 
                 let rutaPdf = orden.rutaPdf;
 
@@ -152,6 +159,9 @@ export class PagosService {
 
             await conexion.commit();
             transaccionActiva = false;
+            ordenCreada = true;
+            conexion.release();
+            conexionLiberada = true;
 
             const idOrdenPago = resultado.insertId;
             const rutaPdf = await this.guardarPDFOrdenPago(
@@ -179,8 +189,60 @@ export class PagosService {
             throw error;
 
         } finally {
-            conexion.release();
+            if (!conexionLiberada) conexion.release();
+            if (ordenCreada) {
+                await this.notificaciones.avisarPersona(
+                    idPersona, 'Pago', `La orden de pago de tu reserva #${idReserva} está disponible.`,
+                    { idReserva },
+                );
+            }
         }
+    }
+
+    async consultarOrdenReserva(idPersona: number, idReserva: number) {
+        const [ordenes] = await this.db.execute<RowDataPacket[]>(
+            `SELECT op.idOrdenPago, op.idReserva, op.total, op.estado, op.rutaPdf,
+                    r.estado AS estadoReserva,
+                    COALESCE(SUM(CASE WHEN p.estado = 'Aprobado' THEN p.monto ELSE 0 END), 0)
+                        AS totalAprobado,
+                    COALESCE(SUM(CASE WHEN p.estado IN ('Pendiente', 'En_proceso')
+                        THEN 1 ELSE 0 END), 0) AS pagosEnProceso,
+                    COALESCE(SUM(CASE WHEN p.estado = 'Aprobado'
+                        AND p.tipoPago = 'Anticipo' THEN p.monto ELSE 0 END), 0)
+                        AS anticipoAprobado
+             FROM orden_de_pago op
+             INNER JOIN reserva r ON r.idReserva = op.idReserva
+             INNER JOIN cliente c ON c.idCliente = r.idCliente
+             LEFT JOIN pago p ON p.idOrdenPago = op.idOrdenPago
+             WHERE op.idReserva = ? AND c.idPersona = ?
+             GROUP BY op.idOrdenPago, op.idReserva, op.total, op.estado,
+                      op.rutaPdf, r.estado`,
+            [idReserva, idPersona],
+        );
+        if (ordenes.length === 0) {
+            throw new NotFoundException('No hay una orden de pago para esta reserva.');
+        }
+        const orden = ordenes[0];
+        const total = Number(orden.total);
+        const aprobado = Number(orden.totalAprobado);
+        const anticipo = Number(orden.anticipoAprobado);
+        const pendientes = Number(orden.pagosEnProceso);
+        if (![total, aprobado, anticipo, pendientes].every(Number.isFinite) ||
+            total <= 0 || aprobado < 0 || anticipo < 0 || pendientes < 0) {
+            throw new BadRequestException('El estado de la orden no es válido.');
+        }
+        return {
+            idOrdenPago: Number(orden.idOrdenPago),
+            idReserva,
+            total,
+            estado: orden.estado,
+            estadoReserva: orden.estadoReserva,
+            rutaPdf: orden.rutaPdf,
+            totalAprobado: aprobado,
+            saldoPendiente: Math.max(0, Math.round((total - aprobado) * 100) / 100),
+            anticipoAprobado: anticipo,
+            pagosEnProceso: pendientes,
+        };
     }
 
     async prepararActualizacionOrdenPago(conexion: PoolConnection, idReserva: number, nuevoTotal: number,) {
@@ -355,11 +417,15 @@ export class PagosService {
                 )
             }
 
+            this.wompiService.verificarConfiguracionCheckout();
 
             let tipoPago: 'Anticipo' | 'Restante';
             let montoPago: number;
 
-            if (orden.antesInicioServicio) {
+            if (orden.estadoReserva === 'EnCurso') {
+                tipoPago = 'Restante';
+                montoPago = montoRestante;
+            } else if (orden.antesInicioServicio) {
                 tipoPago = 'Anticipo';
                 montoPago = Math.min(montoAnticipo, montoRestante);
             } else if (orden.duranteReserva) {
@@ -512,7 +578,7 @@ export class PagosService {
             contenido,
         );
 
-        const rutaPdf = `/archivos/${documento.idDocumento}`;
+        const rutaPdf = `${process.env.VERCEL ? '/api' : ''}/archivos/${documento.idDocumento}`;
 
         await this.db.execute(
             `UPDATE orden_de_pago SET rutaPdf = ? 
@@ -558,6 +624,10 @@ export class PagosService {
 
         const conexion = await this.db.getConnection();
         let transaccionActiva = false;
+        let avisoPago: {
+            idReserva: number; idPago: number;
+            evento: 'pagoAprobado' | 'pagoRechazado' | 'pagoCancelado'
+        } | null = null;
 
         try {
             await conexion.beginTransaction();
@@ -567,6 +637,7 @@ export class PagosService {
                 `SELECT
                 p.idPago,
                 p.idOrdenPago,
+                op.idReserva,
                 p.monto,
                 p.estado,
                 p.idTransaccionWompi,
@@ -686,6 +757,15 @@ export class PagosService {
 
             await conexion.commit();
             transaccionActiva = false;
+            if (nuevoEstado === 'Aprobado' || nuevoEstado === 'Rechazado' ||
+                nuevoEstado === 'Fallido' || nuevoEstado === 'Cancelado') {
+                avisoPago = {
+                    idReserva: pago.idReserva,
+                    idPago: pago.idPago,
+                    evento: nuevoEstado === 'Aprobado' ? 'pagoAprobado' :
+                        nuevoEstado === 'Cancelado' ? 'pagoCancelado' : 'pagoRechazado',
+                };
+            }
 
             return {
                 mensaje: 'Evento de Wompi procesado correctamente.',
@@ -699,6 +779,11 @@ export class PagosService {
             throw error;
         } finally {
             conexion.release();
+            if (avisoPago) {
+                await this.notificaciones.avisarReserva(
+                    avisoPago.idReserva, avisoPago.evento, avisoPago.idPago,
+                );
+            }
         }
     }
 
@@ -728,5 +813,32 @@ export class PagosService {
                 WHERE idOrdenPago = ?`, [orden.idOrdenPago],
             );
         }
+    }
+
+    async obtenerHistorialPagos(idPersona: number) {
+        const [pagos] = await this.db.query<RowDataPacket[]>(
+            `SELECT p.idPago, p.monto, p.fechaHoraPago,
+                    p.estado AS estadoPago, p.tipoPago,
+                    op.idOrdenPago, op.total AS totalOrden,
+                    op.estado AS estadoOrden,
+                    r.idReserva, r.estado AS estadoReserva,
+                    mp.nombre AS metodoPago
+             FROM pago p
+             INNER JOIN orden_de_pago op
+               ON op.idOrdenPago = p.idOrdenPago AND op.idReserva = p.idReserva
+             INNER JOIN reserva r ON r.idReserva = p.idReserva
+             INNER JOIN cliente c ON c.idCliente = r.idCliente
+             LEFT JOIN metodo_pago mp ON mp.idMetodoPago = p.idMetodoPago
+             WHERE c.idPersona = ?
+             ORDER BY p.fechaHoraPago DESC, p.idPago DESC LIMIT 100`,
+            [idPersona],
+        );
+        // La rama nueva exponía placa, nombres, direcciones y referencias de
+        // pago. El historial del cliente solo necesita importes y estados.
+        return {
+            mensaje: 'Historial de pagos recientes.',
+            totalMostrados: pagos.length,
+            pagos,
+        };
     }
 }

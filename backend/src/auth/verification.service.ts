@@ -15,6 +15,13 @@ export class DeliveryError extends ServiceUnavailableException {
   }
 }
 
+function providerMessage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const clean = value.trim();
+  if (!clean || clean.length > 200) return undefined;
+  return clean.replace(/\s+/g, ' ').replace(/[^\w .,;:()\-]/g, ' ').trim();
+}
+
 interface ChallengeRow extends RowDataPacket {
   idPersona: number;
   codigoHash: Buffer | null;
@@ -74,6 +81,10 @@ export class VerificationService {
 
   private async firebaseRequest(path: string, body: object): Promise<Record<string, unknown>> {
     const key = this.config.getOrThrow<string>('FIREBASE_API_KEY');
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(key)) {
+      throw new DeliveryError('La clave de Firebase Web no es válida. Revisa FIREBASE_API_KEY en Vercel.',
+        `FIREBASE ${path} INVALID_API_KEY`);
+    }
     try {
       const response = await fetch(
         `https://identitytoolkit.googleapis.com/v1/accounts:${path}?key=${encodeURIComponent(key)}`,
@@ -87,18 +98,38 @@ export class VerificationService {
           signal: AbortSignal.timeout(10_000),
         },
       );
+      const payload = await response.json().catch(() => null) as
+        { error?: { message?: string } } | null;
       if (!response.ok) {
-        const payload = await response.json().catch(() => null) as
-          { error?: { message?: string } } | null;
         const code = providerCode(payload?.error?.message);
-        throw new DeliveryError('No se pudo enviar el correo de activación.',
+        const mensaje = providerMessage(payload?.error?.message) ?? `FIREBASE HTTP_${response.status}${code ? ` ${code}` : ''}`;
+        throw new DeliveryError(`No se pudo completar la operación de verificación (${path}): ${mensaje}`,
           `FIREBASE ${path} HTTP_${response.status}${code ? ` ${code}` : ''}`);
       }
-      return await response.json() as Record<string, unknown>;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new DeliveryError(`Respuesta inválida de Firebase (${path}).`,
+          `FIREBASE ${path} INVALID_RESPONSE`);
+      }
+      return payload as Record<string, unknown>;
     } catch (error) {
       if (error instanceof DeliveryError) throw error;
-      throw new DeliveryError('No se pudo enviar el correo de activación.',
+      throw new DeliveryError(`No se pudo contactar con Firebase (${path}).`,
         `FIREBASE ${path} ${networkDiagnostic(error)}`);
+    }
+  }
+
+  async solicitarRecuperacion(email: string): Promise<void> {
+    try {
+      await this.firebaseRequest('sendOobCode', {
+        requestType: 'PASSWORD_RESET', email: email.trim(),
+      });
+    } catch (error) {
+      // Identity Toolkit puede responder distinto según su política de
+      // enumeración. La respuesta pública nunca revela si existe la cuenta.
+      if (error instanceof DeliveryError && error.diagnostic.endsWith(' EMAIL_NOT_FOUND')) {
+        return;
+      }
+      throw error;
     }
   }
 
@@ -190,6 +221,13 @@ export class VerificationService {
       telefonoVerificado,
       activada: user.emailVerified && telefonoVerificado,
     };
+  }
+
+  async telefonoConfirmadoParaAvisos(uid: string, telefono: string): Promise<boolean> {
+    const user = await this.firebaseAuth.getUser(uid);
+    // También cubre cuentas antiguas: no basta con tener un número cualquiera
+    // en Firebase; debe ser exactamente el número actual de TiDB.
+    return user.phoneNumber === telefono;
   }
 
   async enviarCodigo(uid: string, idPersona: number): Promise<void> {

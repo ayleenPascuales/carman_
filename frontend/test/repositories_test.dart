@@ -119,12 +119,17 @@ void main() {
       final cancelled = await repository.cancelReservation(reservation.id);
       expect(cancelled.status, ReservationStatus.cancelled);
 
-      final reviewed = await repository.submitReview(
+      await repository.submitReview(
         id: reservation.id,
         rating: 5,
         comment: 'Excelente',
       );
-      expect(reviewed.hasReview, isTrue);
+      expect(
+        (await repository.fetchReservations())
+            .firstWhere((item) => item.id == reservation.id)
+            .hasReview,
+        isTrue,
+      );
     });
 
     test('rejects an invalid date range', () async {

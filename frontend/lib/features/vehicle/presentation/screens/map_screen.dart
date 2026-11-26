@@ -1,7 +1,10 @@
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -37,6 +40,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget build(BuildContext context) {
     final catalog = ref.watch(catalogControllerProvider);
     final vehicles = catalog.vehicles;
+    if (AppConfig.useLiveApi) {
+      return _buildLiveMap(context, vehicles);
+    }
     final selectedVehicle = vehicles.isEmpty
         ? null
         : vehicles[_selected.clamp(0, vehicles.length - 1)];
@@ -233,6 +239,95 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ),
     );
   }
+
+  Widget _buildLiveMap(BuildContext context, List<Vehicle> vehicles) {
+    // Las coordenadas representan únicamente puntos públicos autorizados;
+    // jamás se usa la posición del teléfono para ver el catálogo.
+    final mapped = vehicles.where((vehicle) {
+      final point = vehicle.pickupPoint;
+      return point != null && point.latitude.isFinite &&
+          point.longitude.isFinite &&
+          point.latitude != 0 && point.longitude != 0;
+    }).toList();
+    final selected = mapped.isEmpty
+        ? null : mapped[_selected.clamp(0, mapped.length - 1)];
+    final center = mapped.isEmpty ? null : mapped.first.pickupPoint!;
+
+    return Scaffold(
+      appBar: CarmanTopBar(
+        title: 'Puntos de recogida',
+        onBack: () => context.pop(),
+      ),
+      body: center == null
+          ? const Center(child: Text(
+              'No hay puntos físicos con coordenadas disponibles.',
+            ))
+          : Stack(
+              children: [
+                FlutterMap(
+                  options: MapOptions(
+                    initialCenter: LatLng(center.latitude, center.longitude),
+                    initialZoom: 12,
+                    maxZoom: 18,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.carman.carman_app',
+                    ),
+                    MarkerLayer(markers: [
+                      for (var index = 0; index < mapped.length; index++)
+                        Marker(
+                          point: LatLng(
+                            mapped[index].pickupPoint!.latitude,
+                            mapped[index].pickupPoint!.longitude,
+                          ),
+                          width: 82,
+                          height: 54,
+                          child: _PriceMarker(
+                            vehicle: mapped[index],
+                            selected: selected?.id == mapped[index].id,
+                            onTap: () => setState(() => _selected = index),
+                          ),
+                        ),
+                    ]),
+                    const RichAttributionWidget(
+                      attributions: [
+                        TextSourceAttribution('© OpenStreetMap contributors'),
+                      ],
+                    ),
+                  ],
+                ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: 12,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        '${mapped.length} vehículos · Puntos autorizados. '
+                        'No se muestra la posición del vehículo en vivo.',
+                      ),
+                    ),
+                  ),
+                ),
+                if (selected != null)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 16,
+                    child: SafeArea(
+                      child: _VehicleMapCard(
+                        vehicle: selected,
+                        onTap: () => context.push('/vehicle/${selected.id}'),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
 }
 
 class _PriceMarker extends StatelessWidget {
@@ -340,13 +435,17 @@ class _VehicleMapCard extends StatelessWidget {
                         style: AppTheme.titleMd,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    RatingBadge(rating: vehicle.rating, compact: true),
+                    if (!AppConfig.useLiveApi) ...[
+                      const SizedBox(width: 4),
+                      RatingBadge(rating: vehicle.rating, compact: true),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${vehicle.locationName} · ${vehicle.transmission.label}',
+                  AppConfig.useLiveApi
+                      ? vehicle.locationName
+                      : '${vehicle.locationName} · ${vehicle.transmission.label}',
                   style: AppTheme.bodySm.copyWith(fontSize: 10.5),
                 ),
                 const SizedBox(height: 4),

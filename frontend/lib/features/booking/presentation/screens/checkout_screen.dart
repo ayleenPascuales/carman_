@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
+import '../../../../core/errors/app_exception.dart';
+import '../../../../core/location/foreground_location.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -64,7 +67,10 @@ class CheckoutScreen extends ConsumerWidget {
             icon: Icons.place_outlined,
             title: draft.pickupPoint.name,
             subtitle: draft.pickupPoint.address,
-            onEdit: () => _editPickup(context, ref, draft),
+            onEdit: AppConfig.useLiveApi
+                ? () => _consultDistance(context, ref, draft)
+                : () => _editPickup(context, ref, draft),
+            actionLabel: AppConfig.useLiveApi ? 'Cercanía' : 'Editar',
           ),
         ],
       ),
@@ -80,7 +86,9 @@ class CheckoutScreen extends ConsumerWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          'Pago cifrado · Carman Shield',
+          AppConfig.useLiveApi
+              ? 'Primero confirma la reserva. Los pagos son solo en Sandbox.'
+              : 'Pago cifrado · Carman Shield',
           style: AppTheme.bodySm.copyWith(fontSize: 9),
         ),
       ],
@@ -104,9 +112,13 @@ class CheckoutScreen extends ConsumerWidget {
                             children: [
                               _VehicleSummary(draft: draft),
                               const SizedBox(height: 10),
-                              details,
+                               details,
+                               if (AppConfig.useLiveApi) _DriverOption(
+                                 requested: booking.requestDriver,
+                               ),
                               const SizedBox(height: 10),
-                              _InsuranceSelector(draft: draft),
+                              if (!AppConfig.useLiveApi)
+                                _InsuranceSelector(draft: draft),
                               const SizedBox(height: 12),
                               lockLine,
                             ],
@@ -122,9 +134,10 @@ class CheckoutScreen extends ConsumerWidget {
                                 insuranceName: draft.insurance.name,
                               ),
                               const SizedBox(height: 10),
-                              _PaymentCard(
-                                onTap: () => context.push('/payment-methods'),
-                              ),
+                              if (!AppConfig.useLiveApi)
+                                _PaymentCard(
+                                  onTap: () => context.push('/payment-methods'),
+                                ),
                             ],
                           ),
                         ),
@@ -135,17 +148,22 @@ class CheckoutScreen extends ConsumerWidget {
                         _VehicleSummary(draft: draft),
                         const SizedBox(height: 10),
                         details,
+                        if (AppConfig.useLiveApi) _DriverOption(
+                          requested: booking.requestDriver,
+                        ),
                         const SizedBox(height: 10),
-                        _InsuranceSelector(draft: draft),
+                        if (!AppConfig.useLiveApi)
+                          _InsuranceSelector(draft: draft),
                         const SizedBox(height: 10),
                         _CostBreakdown(
                           pricing: pricing,
                           insuranceName: draft.insurance.name,
                         ),
                         const SizedBox(height: 10),
-                        _PaymentCard(
-                          onTap: () => context.push('/payment-methods'),
-                        ),
+                        if (!AppConfig.useLiveApi)
+                          _PaymentCard(
+                            onTap: () => context.push('/payment-methods'),
+                          ),
                         const SizedBox(height: 12),
                         lockLine,
                       ],
@@ -165,6 +183,37 @@ class CheckoutScreen extends ConsumerWidget {
         onPay: () => _pay(context, ref),
       ),
     );
+  }
+
+  Future<void> _consultDistance(
+      BuildContext context, WidgetRef ref, BookingDraft draft) async {
+    try {
+      // Solo tras pulsar "Cercanía" se solicita permiso; las coordenadas no
+      // se guardan en preferencias ni se incorporan a la reserva.
+      final position = await ForegroundLocation.current();
+      if (!context.mounted) return;
+      final result = await ref.read(tripMapRepositoryProvider)
+          .nearestPickup(draft.vehicle.id, position);
+      if (!context.mounted) return;
+      final distance = result['distanciaAproximadaKm'];
+      showCarmanSnack(
+        context,
+        distance == null
+            ? 'Este es el punto físico habilitado para el vehículo.'
+            : 'Punto físico habilitado: ${AppFormatters.distance(
+                double.tryParse('$distance') ?? 0,
+              )} aprox. en línea recta. Sin cargo extra.',
+        kind: SnackKind.info,
+      );
+    } catch (error) {
+      if (context.mounted) {
+        showCarmanSnack(
+          context,
+          error is AppException ? error.message : 'No se pudo consultar la cercanía.',
+          kind: SnackKind.error,
+        );
+      }
+    }
   }
 
   Future<void> _pay(BuildContext context, WidgetRef ref) async {
@@ -391,14 +440,17 @@ class _VehicleSummary extends StatelessWidget {
                       'Anfitrión ${vehicle.ownerFirstName}',
                       style: AppTheme.bodySm.copyWith(fontSize: 10.5),
                     ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.circle, size: 3, color: AppColors.border),
-                    const SizedBox(width: 6),
-                    RatingBadge(
-                      rating: vehicle.rating,
-                      count: vehicle.tripCount,
-                      compact: true,
-                    ),
+                    if (!AppConfig.useLiveApi || vehicle.reviewCount > 0) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.circle, size: 3, color: AppColors.border),
+                      const SizedBox(width: 6),
+                      RatingBadge(
+                        rating: vehicle.rating,
+                        count: AppConfig.useLiveApi
+                            ? vehicle.reviewCount : vehicle.tripCount,
+                        compact: true,
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -410,18 +462,39 @@ class _VehicleSummary extends StatelessWidget {
   }
 }
 
+class _DriverOption extends ConsumerWidget {
+  const _DriverOption({required this.requested});
+
+  final bool requested;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => CarmanCard(
+    child: SwitchListTile(
+      value: requested,
+      onChanged: ref.read(bookingControllerProvider.notifier).setRequestDriver,
+      title: const Text('Solicitar conductor'),
+      subtitle: const Text(
+        'La asignación depende de disponibilidad. Si no se asigna, podrás '
+        'esperar o continuar sin conductor desde el viaje.',
+      ),
+    ),
+  );
+}
+
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onEdit,
+    this.actionLabel = 'Editar',
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onEdit;
+  final String actionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -454,7 +527,7 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
             Text(
-              'Editar',
+              actionLabel,
               style: AppTheme.labelMd.copyWith(
                 fontSize: 10.5,
                 color: AppColors.primary,
@@ -629,6 +702,7 @@ class _CostBreakdown extends StatelessWidget {
             label: pricing.rentalLabel,
             value: AppFormatters.money(pricing.rentalSubtotal, precise: true),
           ),
+          if (!AppConfig.useLiveApi) ...[
           KeyValueRow(
             label:
                 'Seguro $insuranceName (${pricing.insuranceUnits} ${pricing.insuranceUnits == 1 ? 'día' : 'días'})',
@@ -652,6 +726,7 @@ class _CostBreakdown extends StatelessWidget {
                   '- ${AppFormatters.money(pricing.discount, precise: true)}',
               valueColor: AppColors.successText,
             ),
+          ],
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Divider(),
@@ -664,11 +739,13 @@ class _CostBreakdown extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Total a pagar',
+                      AppConfig.useLiveApi ? 'Precio estimado' : 'Total a pagar',
                       style: AppTheme.titleLg.copyWith(fontSize: 14.5),
                     ),
                     Text(
-                      'Incluye todas las tasas',
+                      AppConfig.useLiveApi
+                          ? 'Por días. Distancia de ruta informativa.'
+                          : 'Incluye todas las tasas',
                       style: AppTheme.bodySm.copyWith(fontSize: 9.5),
                     ),
                   ],
@@ -685,7 +762,7 @@ class _CostBreakdown extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Container(
+          if (!AppConfig.useLiveApi) Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: AppColors.surfaceContainer,
@@ -882,7 +959,9 @@ class _CheckoutBar extends StatelessWidget {
         top: false,
         child: CarmanButton(
           label:
-              'Confirmar y pagar ${AppFormatters.money(total, precise: true)}',
+              AppConfig.useLiveApi
+                  ? 'Crear reserva · ${AppFormatters.money(total, precise: true)}'
+                  : 'Confirmar y pagar ${AppFormatters.money(total, precise: true)}',
           icon: Icons.lock_rounded,
           isLoading: isPaying,
           onPressed: onPay,
@@ -925,10 +1004,14 @@ class _PaymentOverlay extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2.5),
                 ),
                 const SizedBox(height: 16),
-                Text('Procesando pago seguro…', style: AppTheme.titleMd),
+                Text(AppConfig.useLiveApi
+                    ? 'Creando reserva…' : 'Procesando pago seguro…',
+                    style: AppTheme.titleMd),
                 const SizedBox(height: 4),
                 Text(
-                  'Estamos validando tu método de pago con Carman Shield.',
+                  AppConfig.useLiveApi
+                      ? 'No se realizará ningún cargo.'
+                      : 'Estamos validando tu método de pago con Carman Shield.',
                   textAlign: TextAlign.center,
                   style: AppTheme.bodySm.copyWith(fontSize: 10.5),
                 ),

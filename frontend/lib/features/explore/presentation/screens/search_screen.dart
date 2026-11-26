@@ -64,6 +64,37 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     super.dispose();
   }
 
+  Future<TimeOfDay?> _pickServiceTime(DateTime initial) {
+    const hours = [8, 9, 10, 11, 14, 15, 16, 17, 18];
+    return showCarmanSheet<TimeOfDay>(
+      context: context,
+      maxHeightFactor: 0.7,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SheetHeader(
+            title: 'Horario disponible',
+            subtitle: 'Elige una de las horas que permite la reserva.',
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final hour in hours)
+                  ListTile(
+                    title: Text(AppFormatters.time(
+                      DateTime(initial.year, initial.month, initial.day, hour),
+                    )),
+                    onTap: () => Navigator.pop(context, TimeOfDay(hour: hour, minute: 0)),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickStartDate() async {
     final date = await showDatePicker(
       context: context,
@@ -73,7 +104,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       helpText: 'Fecha de recogida',
     );
     if (date == null || !mounted) return;
-    final time = await showTimePicker(
+    final time = AppConfig.useLiveApi
+        ? await _pickServiceTime(_startAt)
+        : await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(_startAt),
       helpText: 'Hora de recogida',
@@ -108,7 +141,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       helpText: 'Fecha de devolución',
     );
     if (date == null || !mounted) return;
-    final time = await showTimePicker(
+    final time = AppConfig.useLiveApi
+        ? await _pickServiceTime(_endAt)
+        : await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(_endAt),
       helpText: 'Hora de devolución',
@@ -348,9 +383,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _pickPrice() async {
-    final isHourly = _draft.mode == RentalMode.hourly;
-    final max = isHourly ? 80.0 : 300.0;
-    final min = isHourly ? 5.0 : 30.0;
+    final isHourly = !AppConfig.useLiveApi && _draft.mode == RentalMode.hourly;
+    final max = AppConfig.useLiveApi ? 1000000.0 : (isHourly ? 80.0 : 300.0);
+    final min = AppConfig.useLiveApi ? 10000.0 : (isHourly ? 5.0 : 30.0);
     var value = (_draft.maxPrice ?? max).clamp(min, max).toDouble();
     final result = await showCarmanSheet<double?>(
       context: context,
@@ -385,7 +420,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 value: value,
                 min: min,
                 max: max,
-                divisions: ((max - min) / 5).round(),
+                divisions: AppConfig.useLiveApi ? 99 : ((max - min) / 5).round(),
                 label: AppFormatters.money(value),
                 onChanged: (next) => setModalState(() => value = next),
               ),
@@ -424,6 +459,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _apply() async {
+    if (AppConfig.useLiveApi &&
+        (!_startAt.isAfter(DateTime.now()) ||
+            !const [8, 9, 10, 11, 14, 15, 16, 17, 18].contains(_startAt.hour) ||
+            !const [8, 9, 10, 11, 14, 15, 16, 17, 18].contains(_endAt.hour) ||
+            _startAt.minute != 0 || _endAt.minute != 0)) {
+      showCarmanSnack(context, 'Selecciona fechas futuras y horas permitidas.',
+          kind: SnackKind.error);
+      return;
+    }
     if (!_endAt.isAfter(_startAt)) {
       showCarmanSnack(
         context,
@@ -547,7 +591,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               const SizedBox(height: 20),
               const _Label('Modalidad'),
               const SizedBox(height: 8),
-              SegmentedControl<RentalMode>(
+              if (!AppConfig.useLiveApi) SegmentedControl<RentalMode>(
                 values: RentalMode.values,
                 selected: mode,
                 labelBuilder: (value) => value.label,
@@ -647,7 +691,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  CarmanFilterChip(
+                  if (!AppConfig.useLiveApi) CarmanFilterChip(
                     label: 'Apertura móvil',
                     selected: _draft.instantBookOnly,
                     onTap: () => setState(() {
@@ -656,7 +700,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       );
                     }),
                   ),
-                  CarmanFilterChip(
+                  if (!AppConfig.useLiveApi) CarmanFilterChip(
                     label: 'Cancelación gratis',
                     selected: _draft.freeCancellationOnly,
                     onTap: () => setState(() {
@@ -665,7 +709,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       );
                     }),
                   ),
-                  CarmanFilterChip(
+                  if (!AppConfig.useLiveApi) CarmanFilterChip(
                     label: 'Automático',
                     selected: _draft.transmission == TransmissionType.automatic,
                     onTap: () => setState(() {

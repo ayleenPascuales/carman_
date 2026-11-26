@@ -98,7 +98,9 @@ export class AuthService {
         };
         const verified = await this.verificarToken(datos.idToken);
         if (verified.uid !== datos.localId) {
-            throw new UnauthorizedException('La cuenta de Firebase no coincide con el usuario registrado.');
+            throw new UnauthorizedException(
+                'El token de Firebase no coincide con la sesión iniciada. Reintenta.',
+            );
         }
         // email no es UNIQUE en el esquema exportado. Resolver siempre por el
         // UID verificado, no por la primera fila que coincida con el correo.
@@ -107,9 +109,16 @@ export class AuthService {
              WHERE uidFirebase = ? LIMIT 1`, [verified.uid],
         );
         const persona = personas[0];
-        if (!persona || persona.email !== email
-            || (personaUsuario && persona.idPersona !== personaUsuario.idPersona)) {
-            throw new UnauthorizedException('La cuenta de Firebase no coincide con el usuario registrado.');
+        if (!persona) {
+            throw new UnauthorizedException(
+                'No encontramos tu usuario Carman. El registro puede haber quedado incompleto; vuelve a registrarte.',
+            );
+        }
+        if (persona.email !== email ||
+            (personaUsuario && persona.idPersona !== personaUsuario.idPersona)) {
+            throw new UnauthorizedException(
+                'El correo o identificador no coincide con la cuenta. Verifica tus datos.',
+            );
         }
         if (persona.estado === 'Suspendido') {
             throw new ForbiddenException(

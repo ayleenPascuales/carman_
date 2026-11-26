@@ -1,5 +1,5 @@
 
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { createHash, timingSafeEqual } from 'crypto';
@@ -40,19 +40,6 @@ export class WompiService {
         this.integritySecret = this.configService.get<string>('WOMPI_INTEGRITY_SECRET')!;
         this.eventsSecret = this.configService.get<string>('WOMPI_EVENTS_SECRET')!;
         this.checkoutUrl = this.configService.get<string>('WOMPI_CHECKOUT_URL')!;
-
-        if (
-            !this.baseUrl ||
-            !this.publicKey ||
-            !this.privateKey ||
-            !this.integritySecret ||
-            !this.eventsSecret ||
-            !this.checkoutUrl
-        ) {
-            throw new InternalServerErrorException(
-                'Faltan credenciales de configuración de Wompi.',
-            );
-        }
     }
 
     private generarFirma(
@@ -65,7 +52,26 @@ export class WompiService {
         return createHash('sha256').update(cadena).digest('hex');
     }
 
+    verificarConfiguracionCheckout(): void {
+        // Los eventos de producción todavía no se procesan en PagosService.
+        // No permitir un cobro real que el sistema no pueda confirmar.
+        if (this.baseUrl !== 'https://sandbox.wompi.co/v1'
+            || !this.publicKey?.startsWith('pub_test_')
+            || !this.privateKey?.startsWith('prv_test_')
+            || !this.integritySecret?.startsWith('test_integrity_')
+            || !this.eventsSecret?.startsWith('test_events_')
+            || this.checkoutUrl !== 'https://checkout.wompi.co/p/') {
+            throw new ServiceUnavailableException(
+                'Los pagos solo están disponibles con la configuración Sandbox completa.',
+            );
+        }
+    }
+
     validarFirmaEvento(evento: EventoWompi): boolean {
+        if (!this.eventsSecret?.startsWith('test_events_')
+            || this.baseUrl !== 'https://sandbox.wompi.co/v1') {
+            return false;
+        }
         try {
             if (
                 !evento.signature?.checksum ||
@@ -133,6 +139,7 @@ export class WompiService {
         if (!referencia) {
             throw new BadRequestException('Falta la referencia para generar el checkout.');
         }
+        this.verificarConfiguracionCheckout();
 
         const montoEnCentavos = Math.round(monto * 100);
 
@@ -177,6 +184,12 @@ export class WompiService {
 
 
     async consultarTransaccion(idTransaccion: string) {
+        if (this.baseUrl !== 'https://sandbox.wompi.co/v1'
+            || !this.privateKey?.startsWith('prv_test_')) {
+            throw new ServiceUnavailableException(
+                'La consulta de transacciones solo está disponible en Sandbox.',
+            );
+        }
         try {
             const respuesta = await axios.get(
                 `${this.baseUrl}/transactions/${encodeURIComponent(idTransaccion)}`,

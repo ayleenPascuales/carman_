@@ -27,6 +27,12 @@
       "timezone": "America/Bogota",
       "path": "/api/internal/inactive-accounts",
       "requestMethod": "GET"
+    },
+    "assign-drivers": {
+      "schedule": "*/30 * * * *",
+      "timezone": "America/Bogota",
+      "path": "/api/internal/assign-drivers",
+      "requestMethod": "GET"
     }
   }
 }

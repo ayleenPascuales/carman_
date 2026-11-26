@@ -24,7 +24,8 @@ enum DriverTripStatus {
   enRoute('En camino', Color(0xFFB45309), Icons.navigation_rounded),
   inProgress('En curso', Color(0xFF0E8A75), Icons.directions_car_rounded),
   completed('Completado', Color(0xFF5F5F69), Icons.done_all_rounded),
-  cancelled('Cancelado', Color(0xFFBA1A1A), Icons.cancel_outlined);
+  cancelled('Cancelado', Color(0xFFBA1A1A), Icons.cancel_outlined),
+  unknown('Estado no disponible', Color(0xFF525252), Icons.help_outline);
 
   const DriverTripStatus(this.label, this.color, this.icon);
 
@@ -55,7 +56,7 @@ enum DriverTripStatus {
       return completed;
     }
     if (normalized.contains('cancel')) return cancelled;
-    return offered;
+    return unknown;
   }
 }
 
@@ -74,6 +75,7 @@ class DriverTrip {
     this.status = DriverTripStatus.offered,
     this.clientAvatarAsset,
     this.notes = '',
+    this.endsAt,
   });
 
   final String id;
@@ -84,6 +86,7 @@ class DriverTrip {
   final String origin;
   final String destination;
   final DateTime scheduledAt;
+  final DateTime? endsAt;
   final double distanceKm;
   final int durationMinutes;
   final double earnings;
@@ -156,21 +159,33 @@ class DriverDashboardData {
     required this.stats,
     required this.availability,
     required this.trips,
+    this.page = 1,
+    this.hasMore = false,
+    this.licenseValid = true,
   });
 
   final DriverStats stats;
   final DriverAvailability availability;
   final List<DriverTrip> trips;
+  final int page;
+  final bool hasMore;
+  final bool licenseValid;
 
   DriverDashboardData copyWith({
     DriverStats? stats,
     DriverAvailability? availability,
     List<DriverTrip>? trips,
+    int? page,
+    bool? hasMore,
+    bool? licenseValid,
   }) {
     return DriverDashboardData(
       stats: stats ?? this.stats,
       availability: availability ?? this.availability,
       trips: trips ?? this.trips,
+      page: page ?? this.page,
+      hasMore: hasMore ?? this.hasMore,
+      licenseValid: licenseValid ?? this.licenseValid,
     );
   }
 }

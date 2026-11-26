@@ -63,8 +63,17 @@ class VehicleDraft {
   };
 }
 
+class CatalogPage {
+  const CatalogPage({required this.vehicles, required this.hasMore});
+
+  final List<Vehicle> vehicles;
+  final bool hasMore;
+}
+
 abstract interface class VehicleRepository {
   Future<List<Vehicle>> fetchCatalog(VehicleQuery query);
+
+  Future<CatalogPage> fetchCatalogPage(VehicleQuery query, int page);
 
   Future<Vehicle?> fetchById(String id);
 
@@ -83,6 +92,12 @@ class DemoVehicleRepository implements VehicleRepository {
     await Future<void>.delayed(const Duration(milliseconds: 450));
     final matches = _vehicles.where(query.matches).toList();
     return query.sortVehicles(matches);
+  }
+
+  @override
+  Future<CatalogPage> fetchCatalogPage(VehicleQuery query, int page) async {
+    final vehicles = await fetchCatalog(query);
+    return CatalogPage(vehicles: page == 1 ? vehicles : const [], hasMore: false);
   }
 
   @override
@@ -174,22 +189,39 @@ class ApiVehicleRepository implements VehicleRepository {
   }
 
   @override
-  Future<List<Vehicle>> fetchCatalog(VehicleQuery query) async {
+  Future<List<Vehicle>> fetchCatalog(VehicleQuery query) async =>
+      (await fetchCatalogPage(query, 1)).vehicles;
+
+  @override
+  Future<CatalogPage> fetchCatalogPage(VehicleQuery query, int page) async {
+    if (page < 1) {
+      throw const ValidationException('La página solicitada no es válida.');
+    }
+    if (query.mode != RentalMode.daily || query.transmission != null ||
+        query.fuel != null || query.instantBookOnly ||
+        query.freeCancellationOnly ||
+        query.sort == SortOption.rating || query.sort == SortOption.distance) {
+      throw const AppException(
+        'Este filtro aún no tiene datos comprobables en el catálogo.',
+        code: 'unsupported_catalog_filter',
+      );
+    }
     final queryParameters = <String, String>{};
     query.toApiJson().forEach((key, value) {
       if (value != null) queryParameters[key] = '$value';
     });
+    queryParameters['pagina'] = '$page';
     final payload = await _api.get(
       ApiEndpoints.vehicleCatalog,
-      token: _token,
       query: queryParameters,
     );
     final raw = payload['vehiculos'] ?? payload['data'] ?? payload['items'];
     if (raw is List) {
-      return raw
+      final vehicles = raw
           .whereType<Map<String, dynamic>>()
           .map(Vehicle.fromJson)
           .toList();
+      return CatalogPage(vehicles: vehicles, hasMore: payload['hayMas'] == true);
     }
     throw const AppException(
       'El catálogo no devolvió datos válidos.',
@@ -201,11 +233,24 @@ class ApiVehicleRepository implements VehicleRepository {
   Future<Vehicle?> fetchById(String id) async {
     try {
       final payload = await _api.get(
-        ApiEndpoints.vehicle(id),
-        token: _requireToken(),
+        ApiEndpoints.publicVehicle(id),
       );
       final raw = payload['vehiculo'] ?? payload;
-      if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);
+      if (raw is Map<String, dynamic>) {
+        final vehicle = Vehicle.fromJson(raw);
+        try {
+          final reviews = await _api.get(ApiEndpoints.vehicleReviews(id));
+          final count = int.tryParse('${reviews['totalCalificaciones']}') ?? 0;
+          final average = double.tryParse('${reviews['promedio']}') ?? 0;
+          if (count > 0 && average >= 1 && average <= 5) {
+            return vehicle.copyWith(rating: average, reviewCount: count);
+          }
+        } on AppException {
+          // Una caída de las valoraciones no debe impedir ver el vehículo;
+          // sin reseñas disponibles no se atribuye una nota ficticia.
+        }
+        return vehicle;
+      }
       return null;
     } on AppException catch (error) {
       if (error.code == 'http_404') return null;

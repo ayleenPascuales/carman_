@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ReservasController } from './reservas.controller';
+import { ReservasService } from './reservas.service';
+import { AuthGuard } from '../auth/auth.guard';
 
 describe('ReservasController', () => {
   let controller: ReservasController;
@@ -7,7 +9,8 @@ describe('ReservasController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ReservasController],
-    }).compile();
+      providers: [{ provide: ReservasService, useValue: {} }],
+    }).overrideGuard(AuthGuard).useValue({ canActivate: () => true }).compile();
 
     controller = module.get<ReservasController>(ReservasController);
   });

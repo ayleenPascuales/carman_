@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -27,6 +28,18 @@ class PaymentMethodsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (AppConfig.useLiveApi) {
+      return Scaffold(
+        appBar: CarmanTopBar(title: 'Pagos', onBack: () => context.pop()),
+        body: const Center(
+          child: EmptyState(
+            title: 'Tarjetas no disponibles',
+            message: 'La web no guarda tarjetas ni realiza cobros. '
+                'Consulta únicamente los movimientos registrados en el historial.',
+          ),
+        ),
+      );
+    }
     final payment = ref.watch(paymentControllerProvider);
     final draft = ref.watch(bookingControllerProvider).draft;
     final selected = payment.selected;

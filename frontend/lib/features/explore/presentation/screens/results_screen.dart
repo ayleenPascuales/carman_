@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
@@ -193,6 +194,27 @@ class ResultsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 14),
                       ],
+                      if (catalog.error != null)
+                        InfoBanner(
+                          title: 'No pudimos actualizar el catálogo',
+                          message: catalog.error!,
+                          color: AppColors.error,
+                          icon: Icons.error_outline_rounded,
+                          compact: true,
+                        ),
+                      if (catalog.hasMore || catalog.isLoadingMore) ...[
+                        const SizedBox(height: 10),
+                        Center(
+                          child: TextButton(
+                            onPressed: catalog.isLoadingMore
+                                ? null
+                                : () => ref.read(catalogControllerProvider.notifier)
+                                    .loadMore(),
+                            child: Text(catalog.isLoadingMore
+                                ? 'Cargando…' : 'Ver más vehículos'),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       Center(
                         child: TextButton.icon(
@@ -244,7 +266,11 @@ class ResultsScreen extends ConsumerWidget {
             child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-              children: SortOption.values.map((option) {
+              children: SortOption.values
+                  .where((option) => !AppConfig.useLiveApi ||
+                      (option != SortOption.rating &&
+                          option != SortOption.distance))
+                  .map((option) {
                 final selected = option == current;
                 return ListTile(
                   leading: Icon(

@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsOptional, ValidateNested, } from "class-validator";
+import { IsArray, IsDefined, IsEnum, IsObject, IsOptional, ValidateNested, } from "class-validator";
 import { Type } from 'class-transformer';
 import { CrearPersonaDto } from "./crearPersona.dto";
 import { CrearVehiculoDto } from "../../vehiculos/dto/crearVehiculo.dto";
@@ -11,6 +11,8 @@ export enum Rol {
 }
 
 export class RegistroInicialDto {
+    @IsDefined()
+    @IsObject()
     @ValidateNested()
     @Type(() => CrearPersonaDto)
     persona: CrearPersonaDto;

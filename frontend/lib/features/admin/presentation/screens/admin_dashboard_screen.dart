@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
@@ -29,11 +33,13 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   final _search = TextEditingController();
+  Timer? _searchDelay;
   _AdminTab _tab = _AdminTab.overview;
   String _query = '';
 
   @override
   void dispose() {
+    _searchDelay?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -97,12 +103,24 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 labelBuilder: (tab) => switch (tab) {
                   _AdminTab.overview => 'Resumen',
                   _AdminTab.users => 'Usuarios',
-                  _AdminTab.approvals => 'Aprobaciones',
+                  _AdminTab.approvals =>
+                    AppConfig.useLiveApi ? 'Revisiones' : 'Aprobaciones',
                 },
                 onChanged: (tab) => setState(() => _tab = tab),
               ),
             ),
             const SizedBox(height: 12),
+            if (state.error != null) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: InfoBanner(
+                  title: 'No se confirmó la operación',
+                  message: state.error!,
+                  color: AppColors.error,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
@@ -117,22 +135,66 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     onApprovals: () =>
                         setState(() => _tab = _AdminTab.approvals),
                     onUsers: () => setState(() => _tab = _AdminTab.users),
-                    onUser: (user) => _showUserSheet(context, user),
+                    onUser: (user) => AppConfig.useLiveApi
+                        ? context.push('/admin/users/${user.id}')
+                        : _showUserSheet(context, user),
                   ),
                   _AdminTab.users => _UsersTab(
                     key: const ValueKey('users'),
                     users: data.users,
                     query: _query,
                     searchController: _search,
-                    onQueryChanged: (value) => setState(() => _query = value),
-                    onTapUser: (user) => _showUserSheet(context, user),
+                    onQueryChanged: (value) {
+                      setState(() => _query = value);
+                      if (AppConfig.useLiveApi) {
+                        _searchDelay?.cancel();
+                        _searchDelay = Timer(
+                          const Duration(milliseconds: 350),
+                          () {
+                            if (mounted) {
+                              ref
+                                  .read(adminControllerProvider.notifier)
+                                  .filterUsers(search: value);
+                            }
+                          },
+                        );
+                      }
+                    },
+                    onTapUser: (user) => AppConfig.useLiveApi
+                        ? context.push('/admin/users/${user.id}')
+                        : _showUserSheet(context, user),
+                    role: state.role,
+                    status: state.status,
+                    onRole: (role) => ref
+                        .read(adminControllerProvider.notifier)
+                        .filterUsers(role: role),
+                    onStatus: (status) => ref
+                        .read(adminControllerProvider.notifier)
+                        .filterUsers(status: status),
+                    hasMore: data.usersHasMore,
+                    loadingMore: state.isLoadingMore,
+                    onLoadMore: () => ref
+                        .read(adminControllerProvider.notifier)
+                        .loadMore(users: true),
                   ),
                   _AdminTab.approvals => _ApprovalsTab(
                     key: const ValueKey('approvals'),
                     approvals: data.approvals,
                     actionId: state.actionId,
-                    onReview: (item, approved) =>
-                        _reviewApproval(context, item, approved),
+                    onReview: (item, approved) => AppConfig.useLiveApi
+                        ? context.push('/admin/revisions/${item.id}')
+                        : _reviewApproval(context, item, approved),
+                    onDetail: (item) =>
+                        context.push('/admin/revisions/${item.id}'),
+                    revisionStatus: state.revisionStatus,
+                    onFilter: (status) => ref
+                        .read(adminControllerProvider.notifier)
+                        .filterRevisions(status),
+                    hasMore: data.revisionsHasMore,
+                    loadingMore: state.isLoadingMore,
+                    onLoadMore: () => ref
+                        .read(adminControllerProvider.notifier)
+                        .loadMore(users: false),
                   ),
                 },
               ),
@@ -229,7 +291,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 label: 'Registro',
                 value: AppFormatters.weekdayDate(user.joinedAt),
               ),
-              _UserSheetRow(label: 'Viajes', value: '${user.trips}'),
+              if (!AppConfig.useLiveApi)
+                _UserSheetRow(label: 'Viajes', value: '${user.trips}'),
               _UserSheetRow(label: 'Roles', value: user.rolesLabel),
               const SizedBox(height: 16),
               if (user.status == AdminUserStatus.suspended)
@@ -249,7 +312,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     );
                   },
                 )
-              else
+              else if (user.status == AdminUserStatus.active && !user.isAdmin)
                 CarmanButton(
                   label: 'Suspender cuenta',
                   variant: CarmanButtonVariant.danger,
@@ -320,14 +383,18 @@ class _OverviewTab extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Aprobaciones pendientes',
+                      AppConfig.useLiveApi
+                          ? 'Revisiones pendientes'
+                          : 'Aprobaciones pendientes',
                       style: AppTheme.labelMd.copyWith(fontSize: 12),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      pending.isEmpty
+                      (AppConfig.useLiveApi
+                              ? data.stats.pendingApprovals == 0
+                              : pending.isEmpty)
                           ? 'Todo al día'
-                          : '${pending.length} solicitudes esperando revisión',
+                          : '${AppConfig.useLiveApi ? data.stats.pendingApprovals : pending.length} solicitudes esperando revisión',
                       style: AppTheme.bodySm.copyWith(fontSize: 10),
                     ),
                   ],
@@ -343,7 +410,9 @@ class _OverviewTab extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         SectionHeader(
-          title: 'Nuevos usuarios',
+          title: AppConfig.useLiveApi
+              ? 'Usuarios de esta página'
+              : 'Nuevos usuarios',
           actionLabel: 'Ver todos',
           onAction: onUsers,
         ),
@@ -365,20 +434,21 @@ class _OverviewTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            const Icon(
-              Icons.shield_outlined,
-              size: 14,
-              color: AppColors.success,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              'Sistema operativo · Carman Admin',
-              style: AppTheme.bodySm.copyWith(fontSize: 9),
-            ),
-          ],
-        ),
+        if (!AppConfig.useLiveApi)
+          Row(
+            children: [
+              const Icon(
+                Icons.shield_outlined,
+                size: 14,
+                color: AppColors.success,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                'Sistema operativo · Carman Admin',
+                style: AppTheme.bodySm.copyWith(fontSize: 9),
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -391,6 +461,22 @@ class _StatsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (AppConfig.useLiveApi) {
+      return CarmanCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Usuarios registrados: ${AppFormatters.integer(stats.totalUsers)}',
+              style: AppTheme.titleMd,
+            ),
+            Text('Conductores disponibles: ${stats.activeDrivers}'),
+            Text('Vehículos activos: ${stats.activeVehicles}'),
+            Text('Reservas hoy: ${stats.reservationsToday}'),
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 13),
       decoration: const BoxDecoration(
@@ -509,6 +595,13 @@ class _UsersTab extends StatelessWidget {
     required this.searchController,
     required this.onQueryChanged,
     required this.onTapUser,
+    required this.role,
+    required this.status,
+    required this.onRole,
+    required this.onStatus,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.onLoadMore,
   });
 
   final List<AdminUser> users;
@@ -516,11 +609,19 @@ class _UsersTab extends StatelessWidget {
   final TextEditingController searchController;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<AdminUser> onTapUser;
+  final String? role;
+  final String? status;
+  final ValueChanged<String> onRole;
+  final ValueChanged<String> onStatus;
+  final bool hasMore;
+  final bool loadingMore;
+  final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) {
     final normalized = query.trim().toLowerCase();
     final filtered = users.where((user) {
+      if (AppConfig.useLiveApi) return true;
       if (normalized.isEmpty) return true;
       return '${user.name} ${user.email} ${user.rolesLabel}'
           .toLowerCase()
@@ -534,10 +635,44 @@ class _UsersTab extends StatelessWidget {
           child: CarmanTextField(
             controller: searchController,
             hint: 'Buscar usuario',
+            maxLength: AppConfig.useLiveApi ? 80 : null,
             prefixIcon: Icons.search_rounded,
             onChanged: onQueryChanged,
           ),
         ),
+        if (AppConfig.useLiveApi)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Row(
+              children: [
+                for (final value in [
+                  '',
+                  'Cliente',
+                  'Conductor',
+                  'Propietario',
+                  'Administrador',
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(value.isEmpty ? 'Todos los roles' : value),
+                      selected: (role ?? '') == value,
+                      onSelected: (_) => onRole(value),
+                    ),
+                  ),
+                for (final value in ['', 'Activo', 'Suspendido', 'Inactivo'])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(value.isEmpty ? 'Todos los estados' : value),
+                      selected: (status ?? '') == value,
+                      onSelected: (_) => onStatus(value),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         Expanded(
           child: filtered.isEmpty
               ? const EmptyState(
@@ -547,13 +682,22 @@ class _UsersTab extends StatelessWidget {
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(18, 4, 18, 28),
-                  itemCount: filtered.length,
+                  itemCount:
+                      filtered.length +
+                      (AppConfig.useLiveApi && hasMore ? 1 : 0),
                   separatorBuilder: (_, _) =>
                       const Divider(height: 1, indent: 66),
-                  itemBuilder: (context, index) => _UserRow(
-                    user: filtered[index],
-                    onTap: () => onTapUser(filtered[index]),
-                  ),
+                  itemBuilder: (context, index) => index == filtered.length
+                      ? TextButton(
+                          onPressed: loadingMore ? null : onLoadMore,
+                          child: Text(
+                            loadingMore ? 'Cargando…' : 'Cargar más usuarios',
+                          ),
+                        )
+                      : _UserRow(
+                          user: filtered[index],
+                          onTap: () => onTapUser(filtered[index]),
+                        ),
                 ),
         ),
       ],
@@ -612,7 +756,9 @@ class _UserRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  user.primaryRole.label,
+                  AppConfig.useLiveApi
+                      ? user.rolesLabel
+                      : user.primaryRole.label,
                   style: AppTheme.bodySm.copyWith(fontSize: 8.5),
                 ),
               ],
@@ -630,15 +776,27 @@ class _ApprovalsTab extends StatelessWidget {
     required this.approvals,
     required this.actionId,
     required this.onReview,
+    required this.onDetail,
+    required this.revisionStatus,
+    required this.onFilter,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.onLoadMore,
   });
 
   final List<AdminApproval> approvals;
   final String? actionId;
   final void Function(AdminApproval approval, bool approved) onReview;
+  final ValueChanged<AdminApproval> onDetail;
+  final String revisionStatus;
+  final ValueChanged<String> onFilter;
+  final bool hasMore;
+  final bool loadingMore;
+  final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) {
-    if (approvals.isEmpty) {
+    if (approvals.isEmpty && !AppConfig.useLiveApi) {
       return const EmptyState(
         title: 'Sin solicitudes',
         message: 'No hay documentos pendientes.',
@@ -655,7 +813,8 @@ class _ApprovalsTab extends StatelessWidget {
             b.status == AdminApprovalStatus.pending) {
           return 1;
         }
-        return b.submittedAt.compareTo(a.submittedAt);
+        return (b.submittedAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(a.submittedAt ?? DateTime.fromMillisecondsSinceEpoch(0));
       });
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -664,18 +823,47 @@ class _ApprovalsTab extends StatelessWidget {
             (constraints.maxWidth - 36 - (columns - 1) * 12) / columns;
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(18, 2, 18, 28),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          child: Column(
             children: [
-              for (final approval in sorted)
-                SizedBox(
-                  width: cardWidth,
-                  child: _ApprovalRow(
-                    approval: approval,
-                    isProcessing: actionId == approval.id,
-                    onApprove: () => onReview(approval, true),
-                    onReject: () => onReview(approval, false),
+              if (AppConfig.useLiveApi)
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final value in ['Pendiente', 'Aprobada'])
+                      ChoiceChip(
+                        label: Text(value),
+                        selected: revisionStatus == value,
+                        onSelected: (_) => onFilter(value),
+                      ),
+                  ],
+                ),
+              if (approvals.isEmpty)
+                const InfoBanner(
+                  title: 'Sin revisiones para este filtro',
+                  message: 'Prueba otro estado o actualiza la lista.',
+                ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final approval in sorted)
+                    SizedBox(
+                      width: cardWidth,
+                      child: _ApprovalRow(
+                        approval: approval,
+                        isProcessing: actionId == approval.id,
+                        onApprove: () => onReview(approval, true),
+                        onReject: () => onReview(approval, false),
+                        onDetail: () => onDetail(approval),
+                      ),
+                    ),
+                ],
+              ),
+              if (AppConfig.useLiveApi && hasMore)
+                TextButton(
+                  onPressed: loadingMore ? null : onLoadMore,
+                  child: Text(
+                    loadingMore ? 'Cargando…' : 'Cargar más revisiones',
                   ),
                 ),
             ],
@@ -692,17 +880,20 @@ class _ApprovalRow extends StatelessWidget {
     required this.isProcessing,
     required this.onApprove,
     required this.onReject,
+    required this.onDetail,
   });
 
   final AdminApproval approval;
   final bool isProcessing;
   final VoidCallback onApprove;
   final VoidCallback onReject;
+  final VoidCallback onDetail;
 
   @override
   Widget build(BuildContext context) {
     final pending = approval.status == AdminApprovalStatus.pending;
     return CarmanCard(
+      onTap: AppConfig.useLiveApi ? onDetail : null,
       showShadow: false,
       padding: const EdgeInsets.all(13),
       child: Column(
@@ -734,15 +925,17 @@ class _ApprovalRow extends StatelessWidget {
                   ],
                 ),
               ),
-              if (pending)
+              if (pending && approval.submittedAt != null)
                 Text(
-                  AppFormatters.relative(approval.submittedAt),
+                  AppFormatters.relative(approval.submittedAt!),
                   style: AppTheme.bodySm.copyWith(fontSize: 8.5),
                 )
               else
                 StatusBadge(
                   label: approval.status == AdminApprovalStatus.approved
                       ? 'Aprobada'
+                      : approval.status == AdminApprovalStatus.finalized
+                      ? 'Finalizada'
                       : 'Rechazada',
                   color: approval.status == AdminApprovalStatus.approved
                       ? AppColors.success
@@ -762,7 +955,7 @@ class _ApprovalRow extends StatelessWidget {
                   style: AppTheme.bodySm.copyWith(fontSize: 9.5),
                 ),
               ),
-              if (pending) ...[
+              if (pending && !AppConfig.useLiveApi) ...[
                 _MiniAction(
                   icon: Icons.close_rounded,
                   color: AppColors.error,
@@ -777,6 +970,8 @@ class _ApprovalRow extends StatelessWidget {
                   onTap: isProcessing ? null : onApprove,
                 ),
               ],
+              if (AppConfig.useLiveApi)
+                const Icon(Icons.chevron_right_rounded, size: 18),
             ],
           ),
         ],

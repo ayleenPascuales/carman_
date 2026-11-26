@@ -276,6 +276,37 @@ class ApiAuthRepository implements AuthRepository {
     return token;
   }
 
+  /// Nunca considera autenticado un perfil almacenado hasta que el backend
+  /// valide el ID token actual y vuelva a enviar los roles de esta cuenta.
+  Future<AuthSession?> restoreSession() async {
+    final token = _store.loadToken();
+    if (token == null || token.isEmpty || !_store.rememberSession) return null;
+    try {
+      final status = VerificationStatus.fromJson(
+        await _api.get(ApiEndpoints.verification, token: token),
+      );
+      if (!status.activated) return null;
+      final profile = await _api.get(ApiEndpoints.profile, token: token);
+      if (_store.loadToken() != token) return null;
+      final user = _mapProfile(profile, '', status);
+      await _store.saveUser(user);
+      return AuthSession(
+        user: user,
+        token: token,
+        remember: true,
+        activated: true,
+        emailVerified: status.emailVerified,
+        phoneVerified: status.phoneVerified,
+      );
+    } on AuthException catch (error) {
+      if (error.code == 'http_401' || error.code == 'http_403') {
+        await _store.clearSession();
+        return null;
+      }
+      rethrow;
+    }
+  }
+
   @override
   Future<AuthSession> login({
     required String email,
@@ -297,7 +328,7 @@ class ApiAuthRepository implements AuthRepository {
     final user = _mapProfile(profile, email, status);
     if (status.activated) {
       if (remember) await _store.saveUser(user);
-      await _store.saveToken(token);
+      await _store.saveToken(token, persistent: remember);
       await _store.setRememberSession(remember);
       _pendingToken = null;
     } else {
@@ -396,8 +427,10 @@ class ApiAuthRepository implements AuthRepository {
 
   @override
   Future<void> requestPasswordReset(String email) async {
-    // Firebase handles the email delivery from the dashboard / future endpoint.
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await _api.post(
+      ApiEndpoints.requestPasswordReset,
+      body: {'email': email.trim()},
+    );
   }
 
   @override
@@ -431,7 +464,10 @@ class ApiAuthRepository implements AuthRepository {
     required String email,
     required String password,
   }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    throw const AppException(
+      'Usa el enlace seguro enviado a tu correo para cambiar la contraseña.',
+      code: 'password_reset_link_required',
+    );
   }
 
   @override

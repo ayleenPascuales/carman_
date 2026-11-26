@@ -1,0 +1,20 @@
+name: carman-ensayo
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: carman_ensayo
+      MYSQL_USER: carman_ensayo
+      MYSQL_PASSWORD: ${CARMAN_TEST_MYSQL_PASSWORD:?Configura la contraseña local}
+      MYSQL_ROOT_PASSWORD: ${CARMAN_TEST_MYSQL_ROOT_PASSWORD:?Configura la contraseña root local}
+    ports:
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u carman_ensayo -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    volumes:
+      - carman_ensayo_data:/var/lib/mysql
+volumes:
+  carman_ensayo_data:

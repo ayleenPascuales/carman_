@@ -33,7 +33,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void initState() {
     super.initState();
     _emailController = TextEditingController(
-      text: widget.initialEmail ?? AppConfig.demoEmail,
+      text: widget.initialEmail ?? (AppConfig.useLiveApi ? '' : AppConfig.demoEmail),
     );
   }
 
@@ -194,13 +194,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       isLoading: auth.isSubmitting,
                       onPressed: _submit,
                     ),
-                    const SizedBox(height: 8),
-                    Center(
-                      child: TextButton(
-                        onPressed: _useDemo,
-                        child: const Text('Usar acceso demo'),
+                    if (!AppConfig.useLiveApi) ...[
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton(
+                          onPressed: _useDemo,
+                          child: const Text('Usar acceso demo'),
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 30),
                     const Divider(),
                     const SizedBox(height: 18),

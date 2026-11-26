@@ -97,6 +97,25 @@ abstract final class PricingService {
     required DateTime endAt,
     required InsurancePlan insurance,
   }) {
+    if (AppConfig.useLiveApi) {
+      // El backend cobra días (DATEDIFF mínimo 1), no horas, IVA, seguro,
+      // servicio, depósito ni descuentos calculados solo para la demo.
+      final days = DateTime(endAt.year, endAt.month, endAt.day)
+          .difference(DateTime(startAt.year, startAt.month, startAt.day))
+          .inDays.clamp(1, 365);
+      return PricingBreakdown(
+        mode: RentalMode.daily,
+        units: days,
+        unitRate: vehicle.pricePerDay,
+        rentalSubtotal: vehicle.pricePerDay * days,
+        insuranceUnits: 0,
+        insuranceSubtotal: 0,
+        serviceFee: 0,
+        taxes: 0,
+        discount: 0,
+        deposit: 0,
+      );
+    }
     final difference = endAt.difference(startAt);
     final hours = (difference.inMinutes / 60).ceil().clamp(2, 24 * 30);
     final days = (difference.inHours / 24).ceil().clamp(1, 30);
@@ -228,7 +247,7 @@ class BookingDraft {
 }
 
 enum ReservationStatus {
-  pendingPayment('Pago pendiente', Color(0xFFB45309), Icons.schedule_rounded),
+  pendingPayment('Pendiente', Color(0xFFB45309), Icons.schedule_rounded),
   confirmed(
     'Confirmada',
     Color(0xFF0E8A75),
@@ -246,7 +265,8 @@ enum ReservationStatus {
   final Color color;
   final IconData icon;
 
-  bool get isUpcoming => this == confirmed || this == active;
+  bool get isUpcoming =>
+      this == pendingPayment || this == confirmed || this == active;
 
   bool get isFinal => this == completed || this == cancelled || this == expired;
 }
@@ -267,7 +287,10 @@ class Reservation {
     this.digitalKeyCode = 'CRMN-4821',
     this.insuranceName = 'Allianz Premium',
     this.hasReview = false,
+    this.canReview = true,
     this.cancellationFee = 0,
+    this.canOperate = false,
+    this.awaitingDriverDecision = false,
   });
 
   final String id;
@@ -284,7 +307,10 @@ class Reservation {
   final String digitalKeyCode;
   final String insuranceName;
   final bool hasReview;
+  final bool canReview;
   final double cancellationFee;
+  final bool canOperate;
+  final bool awaitingDriverDecision;
 
   String get datesLabel {
     final days = PricingService.unitsFor(
@@ -338,7 +364,10 @@ class Reservation {
       digitalKeyCode: digitalKeyCode,
       insuranceName: insuranceName,
       hasReview: hasReview ?? this.hasReview,
+      canReview: canReview,
       cancellationFee: cancellationFee,
+      canOperate: canOperate,
+      awaitingDriverDecision: awaitingDriverDecision,
     );
   }
 }

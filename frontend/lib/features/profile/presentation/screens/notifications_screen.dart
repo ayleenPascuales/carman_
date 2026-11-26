@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -5,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/carman_top_bar.dart';
 import '../../../../shared/widgets/feedback_widgets.dart';
 import '../../../notifications/application/notifications_controller.dart';
@@ -24,9 +27,16 @@ class NotificationsScreen extends ConsumerWidget {
         actions: [
           if (state.unreadCount > 0)
             TextButton(
-              onPressed: () => ref
-                  .read(notificationsControllerProvider.notifier)
-                  .markAllRead(),
+              onPressed: () async {
+                try {
+                  await ref.read(notificationsControllerProvider.notifier).markAllRead();
+                } catch (_) {
+                  if (context.mounted) {
+                    showCarmanSnack(context, 'No se pudo marcar como leído. Inténtalo de nuevo.',
+                        kind: SnackKind.error);
+                  }
+                }
+              },
               child: const Text('Leer todo'),
             ),
         ],
@@ -52,15 +62,22 @@ class NotificationsScreen extends ConsumerWidget {
                 itemBuilder: (context, index) {
                   final item = state.items[index];
                   return InkWell(
-                    onTap: () {
-                      ref
-                          .read(notificationsControllerProvider.notifier)
-                          .markRead(item.id);
+                    onTap: () async {
+                      try {
+                        await ref.read(notificationsControllerProvider.notifier)
+                            .markRead(item.id);
+                      } catch (_) {
+                        if (context.mounted) {
+                          showCarmanSnack(context, 'No se pudo marcar como leído.',
+                              kind: SnackKind.error);
+                        }
+                      }
+                      if (!context.mounted) return;
                       if (item.actionRoute != null) {
                         if (item.actionRoute == '/trips') {
                           context.go('/trips');
                         } else {
-                          context.push(item.actionRoute!);
+                          unawaited(context.push(item.actionRoute!));
                         }
                       }
                     },

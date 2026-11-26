@@ -117,6 +117,7 @@ class Vehicle {
     required this.pricePerDay,
     required this.rating,
     required this.tripCount,
+    this.reviewCount = 0,
     required this.ownerName,
     required this.locationName,
     required this.city,
@@ -151,6 +152,7 @@ class Vehicle {
   final double pricePerDay;
   final double rating;
   final int tripCount;
+  final int reviewCount;
   final String ownerName;
   final String? ownerAvatarAsset;
   final OwnerBadge ownerBadge;
@@ -220,6 +222,7 @@ class Vehicle {
     double? pricePerDay,
     double? rating,
     int? tripCount,
+    int? reviewCount,
     String? ownerName,
     String? ownerAvatarAsset,
     OwnerBadge? ownerBadge,
@@ -254,6 +257,7 @@ class Vehicle {
       pricePerDay: pricePerDay ?? this.pricePerDay,
       rating: rating ?? this.rating,
       tripCount: tripCount ?? this.tripCount,
+      reviewCount: reviewCount ?? this.reviewCount,
       ownerName: ownerName ?? this.ownerName,
       ownerAvatarAsset: ownerAvatarAsset ?? this.ownerAvatarAsset,
       ownerBadge: ownerBadge ?? this.ownerBadge,
@@ -314,6 +318,8 @@ class Vehicle {
           (json['tripCount'] as num?)?.toInt() ??
           (json['viajes'] as num?)?.toInt() ??
           0,
+      reviewCount:
+          (json['totalCalificaciones'] as num?)?.toInt() ?? 0,
       ownerName: '${json['ownerName'] ?? json['anfitrion'] ?? 'Anfitrión'}',
       ownerBadge: fromTiDb ? OwnerBadge.unknown : OwnerBadge.verified,
       locationName:
@@ -358,8 +364,10 @@ class Vehicle {
               distance:
                   (pointJson['distance'] as num?)?.toDouble() ??
                   (pointJson['distancia'] as num?)?.toDouble() ??
-                  0.35,
+                  0,
               isFree: pointJson['gratis'] as bool? ?? true,
+              latitude: _decimal(pointJson['latitud'] ?? pointJson['latitude']) ?? 0,
+              longitude: _decimal(pointJson['longitud'] ?? pointJson['longitude']) ?? 0,
             )
           : null,
     );

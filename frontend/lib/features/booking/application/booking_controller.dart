@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/booking.dart';
 import '../../../data/models/vehicle.dart';
@@ -42,6 +45,7 @@ class BookingState {
     this.error,
     this.failure,
     this.lastReservation,
+    this.requestDriver = false,
   });
 
   final BookingDraft? draft;
@@ -49,6 +53,7 @@ class BookingState {
   final String? error;
   final BookingFailureData? failure;
   final Reservation? lastReservation;
+  final bool requestDriver;
 
   BookingState copyWith({
     BookingDraft? draft,
@@ -56,6 +61,7 @@ class BookingState {
     String? error,
     BookingFailureData? failure,
     Reservation? lastReservation,
+    bool? requestDriver,
     bool clearError = false,
     bool clearFailure = false,
   }) {
@@ -65,6 +71,7 @@ class BookingState {
       error: clearError ? null : (error ?? this.error),
       failure: clearFailure ? null : (failure ?? this.failure),
       lastReservation: lastReservation ?? this.lastReservation,
+      requestDriver: requestDriver ?? this.requestDriver,
     );
   }
 }
@@ -94,13 +101,56 @@ class BookingController extends Notifier<BookingState> {
     state = BookingState(
       draft: BookingDraft(
         vehicle: vehicle,
-        startAt: startAt,
-        endAt: endAt,
-        mode: catalogQuery.mode,
-        pickupPoint: vehicle.pickupPoint ?? _fallbackPickup(vehicle),
-        insurance: InsurancePlan.premium,
+        startAt: AppConfig.useLiveApi ? _horaPermitida(startAt) : startAt,
+        endAt: AppConfig.useLiveApi ? _horaPermitida(endAt) : endAt,
+        mode: AppConfig.useLiveApi ? RentalMode.daily : catalogQuery.mode,
+        pickupPoint: vehicle.pickupPoint ??
+            (AppConfig.useLiveApi
+                ? PickupPoint(
+                    id: '${vehicle.id}-pendiente',
+                    name: 'Punto asignado al vehículo',
+                    city: vehicle.city,
+                    address: 'Se consultará al confirmar',
+                    distance: 0,
+                  )
+                : _fallbackPickup(vehicle)),
+        insurance: AppConfig.useLiveApi ? InsurancePlan.basic : InsurancePlan.premium,
       ),
     );
+    if (AppConfig.useLiveApi) {
+      unawaited(_loadAssignedPickup(vehicle.id));
+    }
+  }
+
+  Future<void> _loadAssignedPickup(String vehicleId) async {
+    try {
+      final result = await ref.read(tripMapRepositoryProvider)
+          .nearestPickup(vehicleId);
+      final point = result['punto'];
+      if (!ref.mounted || point is! Map<String, dynamic> ||
+          state.draft?.vehicle.id != vehicleId) {
+        return;
+      }
+      updatePickup(PickupPoint(
+        id: '${point['idPunto']}',
+        name: '${point['nombre'] ?? ''}',
+        city: '${point['ciudad'] ?? ''}',
+        address: '${point['direccion'] ?? ''}',
+        latitude: double.tryParse('${point['latitud']}') ?? 0,
+        longitude: double.tryParse('${point['longitud']}') ?? 0,
+        distance: 0,
+      ));
+    } on AppException catch (error) {
+      if (ref.mounted && state.draft?.vehicle.id == vehicleId) {
+        state = state.copyWith(error: error.message);
+      }
+    }
+  }
+
+  DateTime _horaPermitida(DateTime date) {
+    const horas = [8, 9, 10, 11, 14, 15, 16, 17, 18];
+    final hour = horas.contains(date.hour) && date.minute == 0 ? date.hour : 10;
+    return DateTime(date.year, date.month, date.day, hour);
   }
 
   PickupPoint _fallbackPickup(Vehicle vehicle) {
@@ -125,6 +175,7 @@ class BookingController extends Notifier<BookingState> {
   }
 
   void updateMode(RentalMode mode) {
+    if (AppConfig.useLiveApi) return;
     final draft = state.draft;
     if (draft == null) return;
     final units = draft.pricing.units;
@@ -163,9 +214,21 @@ class BookingController extends Notifier<BookingState> {
     state = state.copyWith(clearFailure: true);
   }
 
+  void setRequestDriver(bool value) {
+    state = state.copyWith(requestDriver: value, clearError: true);
+  }
+
   Future<PaymentOutcome> pay() async {
     final draft = state.draft;
     if (draft == null) return PaymentOutcome.error;
+    if (AppConfig.useLiveApi &&
+        (!RegExp(r'^\d+$').hasMatch(draft.pickupPoint.id) ||
+            draft.vehicle.pricePerDay <= 0)) {
+      state = state.copyWith(
+        error: 'Aún no se pudo verificar el punto o la tarifa de este vehículo.',
+      );
+      return PaymentOutcome.error;
+    }
     final user = ref.read(authControllerProvider).user;
     if (user == null || !user.canBook) {
       return PaymentOutcome.licenseRequired;
@@ -179,12 +242,19 @@ class BookingController extends Notifier<BookingState> {
     try {
       final reservation = await ref
           .read(bookingRepositoryProvider)
-          .createReservation(draft: draft, paymentMethod: method);
+           .createReservation(
+             draft: draft, paymentMethod: method,
+             requestDriver: AppConfig.useLiveApi && state.requestDriver,
+           );
       state = state.copyWith(isPaying: false, lastReservation: reservation);
       ref.invalidate(tripsControllerProvider);
-      ref
-          .read(notificationsControllerProvider.notifier)
-          .addReservation(reservation: reservation);
+      if (AppConfig.useLiveApi) {
+        ref.invalidate(notificationsControllerProvider);
+      } else {
+        ref
+            .read(notificationsControllerProvider.notifier)
+            .addReservation(reservation: reservation);
+      }
       return PaymentOutcome.success;
     } on PaymentDeclinedException catch (error) {
       state = state.copyWith(

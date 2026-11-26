@@ -160,6 +160,23 @@ class _AddVehicleScreenState extends ConsumerState<AddVehicleScreen> {
   Widget build(BuildContext context) {
     final owner = ref.watch(ownerControllerProvider);
     final user = ref.watch(authControllerProvider).user;
+    if (AppConfig.useLiveApi) {
+      return Scaffold(
+        appBar: CarmanTopBar(title: 'Registrar vehículo',
+            onBack: () => context.go('/profile')),
+        body: EmptyState(
+          title: 'Alta pendiente de carga segura',
+          message: 'El registro exige fotos y tarjeta de propiedad, '
+              'pero aún no hay una carga privada verificada para adjuntarlas. '
+              'No envíes documentos por enlaces externos ni uses fotos de ejemplo.',
+          icon: Icons.verified_user_outlined,
+          actionLabel: user?.isOwner == true
+              ? 'Ver mis vehículos' : 'Volver al perfil',
+          onAction: () => context.go(
+              user?.isOwner == true ? '/owner' : '/profile'),
+        ),
+      );
+    }
     if (user == null || !user.isOwner) {
       return Scaffold(
         appBar: CarmanTopBar(

@@ -106,7 +106,7 @@ void main() {
     () async {
       await store.saveToken('firebase-test-token');
       final client = MockClient((request) async {
-        expect(request.url.path, '/vehiculos/19');
+         expect(request.url.path, '/vehiculos/catalogo/19');
         return http.Response('{"message":"No autorizado"}', 403);
       });
       final repository = ApiVehicleRepository(

@@ -7,7 +7,7 @@ import '../remote/api_endpoints.dart';
 import '../remote/api_mappers.dart';
 
 abstract interface class DriverRepository {
-  Future<DriverDashboardData> fetchDashboard();
+  Future<DriverDashboardData> fetchDashboard({int page = 1});
 
   Future<void> setAvailability(bool available);
 
@@ -28,7 +28,7 @@ class DemoDriverRepository implements DriverRepository {
   DriverStats _stats = DriverMockData.stats;
 
   @override
-  Future<DriverDashboardData> fetchDashboard() async {
+  Future<DriverDashboardData> fetchDashboard({int page = 1}) async {
     await Future<void>.delayed(const Duration(milliseconds: 380));
     return DriverDashboardData(
       stats: _stats,
@@ -103,8 +103,15 @@ class ApiDriverRepository implements DriverRepository {
   }
 
   @override
-  Future<DriverDashboardData> fetchDashboard() async {
-    final payload = await _api.get(ApiEndpoints.driverSummary, token: _token());
+  Future<DriverDashboardData> fetchDashboard({int page = 1}) async {
+    if (page < 1 || page > 9999) {
+      throw const ValidationException('La página no es válida.');
+    }
+    final payload = await _api.get(
+      ApiEndpoints.driverTrips,
+      token: _token(),
+      query: {'pagina': '$page'},
+    );
     return ApiMappers.driverDashboard(payload);
   }
 
@@ -113,13 +120,17 @@ class ApiDriverRepository implements DriverRepository {
     await _api.patch(
       ApiEndpoints.driverAvailability,
       token: _token(),
-      body: {'disponible': available},
+      body: {'disponibilidad': available},
     );
   }
 
   @override
   Future<void> acceptTrip(String id) async {
-    await _api.patch(ApiEndpoints.driverAccept(id), token: _token());
+    await _api.patch(
+      ApiEndpoints.driverAccept(id),
+      token: _token(),
+      body: {'aceptar': true},
+    );
   }
 
   @override
@@ -134,6 +145,10 @@ class ApiDriverRepository implements DriverRepository {
 
   @override
   Future<void> declineTrip(String id) async {
-    await _api.patch(ApiEndpoints.driverDecline(id), token: _token());
+    await _api.patch(
+      ApiEndpoints.driverDecline(id),
+      token: _token(),
+      body: {'aceptar': false},
+    );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
@@ -24,7 +25,11 @@ class OwnerDashboardScreen extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     final state = ref.watch(ownerControllerProvider);
     final trips = ref.watch(tripsControllerProvider);
-    final pending = trips.upcoming.take(2).toList();
+    final ownIds = state.listings.map((listing) => listing.vehicle.id).toSet();
+    final ownUpcoming = (AppConfig.useLiveApi
+            ? trips.upcoming.where((trip) => ownIds.contains(trip.vehicle.id))
+            : trips.upcoming).toList();
+    final pending = ownUpcoming.take(2).toList();
 
     if (user == null || !user.isOwner) {
       return Scaffold(
@@ -49,7 +54,14 @@ class OwnerDashboardScreen extends ConsumerWidget {
           onAction: () => context.push('/owner/add-vehicle'),
         ),
         const SizedBox(height: 8),
-        if (state.listings.isEmpty)
+        if (state.error != null && state.listings.isEmpty)
+          EmptyState(
+            title: 'No pudimos consultar tu inventario',
+            message: state.error!,
+            actionLabel: 'Reintentar',
+            onAction: () => ref.read(ownerControllerProvider.notifier).load(),
+          )
+        else if (state.listings.isEmpty)
           EmptyState(
             title: 'Sin vehículos',
             message: 'Publica tu primer coche para empezar.',
@@ -66,18 +78,18 @@ class OwnerDashboardScreen extends ConsumerWidget {
                 for (var index = 0; index < state.listings.length; index++) ...[
                   _VehicleRow(
                     listing: state.listings[index],
-                    onTap: () => context.push(
-                      '/vehicle/${state.listings[index].vehicle.id}',
-                    ),
-                    onStatusChanged: (status) {
-                      ref
-                          .read(ownerControllerProvider.notifier)
-                          .setStatus(state.listings[index].vehicle.id, status);
-                      showCarmanSnack(
-                        context,
-                        '${status.label}.',
-                        kind: SnackKind.success,
-                      );
+                    onTap: () => context.push(AppConfig.useLiveApi
+                        ? '/owner/vehicles/${state.listings[index].vehicle.id}'
+                        : '/vehicle/${state.listings[index].vehicle.id}'),
+                    onStatusChanged: (status) async {
+                      final changed = await ref.read(ownerControllerProvider.notifier)
+                          .changeStatus(state.listings[index].vehicle.id, status);
+                      if (!context.mounted) return;
+                      showCarmanSnack(context,
+                          changed ? 'Estado confirmado: ${status.label}.'
+                              : ref.read(ownerControllerProvider).error ??
+                                  'No se pudo actualizar el estado.',
+                          kind: changed ? SnackKind.success : SnackKind.error);
                     },
                   ),
                   if (index != state.listings.length - 1)
@@ -94,12 +106,18 @@ class OwnerDashboardScreen extends ConsumerWidget {
       children: [
         SectionHeader(
           title: 'Reservas',
-          count: state.stats.pendingReservations,
+          count: AppConfig.useLiveApi ? (trips.isLoading ? null : ownUpcoming.length)
+              : state.stats.pendingReservations,
           actionLabel: 'Ver todas',
           onAction: () => context.go('/trips'),
         ),
         const SizedBox(height: 8),
-        if (pending.isEmpty)
+        if (AppConfig.useLiveApi && trips.isLoading)
+          const CenteredLoader()
+        else if (AppConfig.useLiveApi && trips.error != null)
+          InfoBanner(title: 'No pudimos consultar reservas',
+              message: trips.error!, color: AppColors.error)
+        else if (pending.isEmpty)
           Text(
             'No hay reservas pendientes.',
             style: AppTheme.bodySm.copyWith(fontSize: 10.5),
@@ -151,7 +169,10 @@ class OwnerDashboardScreen extends ConsumerWidget {
     );
 
     final note = Text(
-      'Comisión Carman 15% · Liquidación semanal',
+      AppConfig.useLiveApi
+          ? 'El panel muestra inventario propio; ingresos y liquidaciones '
+            'requieren un contrato de datos adicional.'
+          : 'Comisión Carman 15% · Liquidación semanal',
       style: AppTheme.bodySm.copyWith(fontSize: 9),
     );
 
@@ -194,6 +215,9 @@ class OwnerDashboardScreen extends ConsumerWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _Overview(stats: state.stats),
+                                    if (state.error != null && state.listings.isNotEmpty)
+                                      InfoBanner(title: 'Inventario no actualizado',
+                                          message: state.error!, color: AppColors.error),
                                     const SizedBox(height: 22),
                                     vehiclesSection,
                                     const SizedBox(height: 18),
@@ -218,6 +242,9 @@ class OwnerDashboardScreen extends ConsumerWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _Overview(stats: state.stats),
+                              if (state.error != null && state.listings.isNotEmpty)
+                                InfoBanner(title: 'Inventario no actualizado',
+                                    message: state.error!, color: AppColors.error),
                               const SizedBox(height: 22),
                               vehiclesSection,
                               const SizedBox(height: 22),
@@ -241,6 +268,13 @@ class _Overview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (AppConfig.useLiveApi) {
+      return CarmanCard(child: Row(children: [
+        Expanded(child: Text('Vehículos propios: ${stats.vehicles}',
+            style: AppTheme.titleMd)),
+        Text('Activos: ${stats.activeVehicles}', style: AppTheme.labelMd),
+      ]));
+    }
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
       decoration: BoxDecoration(
@@ -377,14 +411,25 @@ class _VehicleRow extends StatelessWidget {
             color: listing.meta.status.color,
             small: true,
           ),
-          PopupMenuButton<OwnerVehicleStatus>(
+          if (!AppConfig.useLiveApi ||
+              listing.meta.status == OwnerVehicleStatus.available ||
+              listing.meta.status == OwnerVehicleStatus.inactive)
+            PopupMenuButton<OwnerVehicleStatus>(
             icon: const Icon(
               Icons.more_vert_rounded,
               size: 18,
               color: AppColors.tertiaryText,
             ),
             onSelected: onStatusChanged,
-            itemBuilder: (context) => const [
+            itemBuilder: (context) => AppConfig.useLiveApi
+                ? [
+                    if (listing.meta.status == OwnerVehicleStatus.available)
+                      const PopupMenuItem(value: OwnerVehicleStatus.inactive,
+                          child: Text('Pausar')),
+                    if (listing.meta.status == OwnerVehicleStatus.inactive)
+                      const PopupMenuItem(value: OwnerVehicleStatus.available,
+                          child: Text('Reactivar')),
+                  ] : const [
               PopupMenuItem(
                 value: OwnerVehicleStatus.available,
                 child: Text('Disponible'),

@@ -2,11 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
 import '../../../../data/models/booking.dart';
+import '../../../../data/repositories/api_booking_repository.dart';
+import '../../../../providers.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/carman_button.dart';
 import '../../../../shared/widgets/carman_card.dart';
@@ -16,6 +19,7 @@ import '../../../../shared/widgets/feedback_widgets.dart';
 import '../../../../shared/widgets/sheets.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../application/trips_controller.dart';
+import '../widgets/trip_route_panel.dart';
 
 class TripDetailScreen extends ConsumerWidget {
   const TripDetailScreen({super.key, required this.reservationId});
@@ -126,8 +130,9 @@ class TripDetailScreen extends ConsumerWidget {
               ],
             ),
           ),
-          if (reservation.status == ReservationStatus.active ||
-              reservation.status == ReservationStatus.confirmed) ...[
+          if (!AppConfig.useLiveApi &&
+              (reservation.status == ReservationStatus.active ||
+              reservation.status == ReservationStatus.confirmed)) ...[
             const SizedBox(height: 12),
             _DigitalKeyCard(reservation: reservation),
           ],
@@ -146,18 +151,18 @@ class TripDetailScreen extends ConsumerWidget {
                 const Divider(height: 18),
                 _DetailRow(
                   icon: Icons.location_on_rounded,
-                  label: 'Punto de entrega',
+                   label: 'Punto de recogida',
                   value:
                       '${reservation.pickupPoint.name}\n${reservation.pickupPoint.address}',
                 ),
-                const Divider(height: 18),
-                _DetailRow(
+                if (!AppConfig.useLiveApi) const Divider(height: 18),
+                if (!AppConfig.useLiveApi) _DetailRow(
                   icon: Icons.shield_rounded,
                   label: 'Cobertura',
                   value: reservation.insuranceName,
                 ),
-                const Divider(height: 18),
-                _DetailRow(
+                if (!AppConfig.useLiveApi) const Divider(height: 18),
+                if (!AppConfig.useLiveApi) _DetailRow(
                   icon: Icons.credit_card_rounded,
                   label: 'Método de pago',
                   value: reservation.paymentMethodLabel,
@@ -165,19 +170,23 @@ class TripDetailScreen extends ConsumerWidget {
               ],
             ),
           ),
+          if (AppConfig.useLiveApi) ...[
+            const SizedBox(height: 12),
+            TripRoutePanel(reservation: reservation),
+          ],
           const SizedBox(height: 12),
           CarmanCard(
             padding: const EdgeInsets.all(15),
             child: Column(
               children: [
-                KeyValueRow(
+                if (!AppConfig.useLiveApi) KeyValueRow(
                   label: reservation.pricing.rentalLabel,
                   value: AppFormatters.money(
                     reservation.pricing.rentalSubtotal,
                     precise: true,
                   ),
                 ),
-                KeyValueRow(
+                if (!AppConfig.useLiveApi) KeyValueRow(
                   label: 'Seguro y servicio',
                   value: AppFormatters.money(
                     reservation.pricing.insuranceSubtotal +
@@ -185,7 +194,7 @@ class TripDetailScreen extends ConsumerWidget {
                     precise: true,
                   ),
                 ),
-                KeyValueRow(
+                if (!AppConfig.useLiveApi) KeyValueRow(
                   label: 'Impuestos',
                   value: AppFormatters.money(
                     reservation.pricing.taxes,
@@ -194,7 +203,7 @@ class TripDetailScreen extends ConsumerWidget {
                 ),
                 const Divider(height: 16),
                 KeyValueRow(
-                  label: 'Total',
+                   label: AppConfig.useLiveApi ? 'Precio estimado' : 'Total',
                   value: AppFormatters.money(
                     reservation.pricing.total,
                     precise: true,
@@ -206,8 +215,51 @@ class TripDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
-          if (reservation.status == ReservationStatus.confirmed) ...[
-            if (reservation.isCancellable)
+          if (AppConfig.useLiveApi && reservation.canReview &&
+              (reservation.status == ReservationStatus.confirmed ||
+               reservation.status == ReservationStatus.active)) ...[
+            CarmanButton(
+              label: 'Ver orden y pagos',
+              icon: Icons.receipt_long_outlined,
+              onPressed: () => context.push('/trip/${reservation.id}/payment'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (AppConfig.useLiveApi && reservation.canReview &&
+              reservation.awaitingDriverDecision) ...[
+            CarmanButton(
+              label: 'Continuar sin conductor',
+              onPressed: () => _act(context, ref,
+                  () => (ref.read(bookingRepositoryProvider) as ApiBookingRepository)
+                      .decideWithoutDriver(reservation.id, 'Continuar')),
+            ),
+            const SizedBox(height: 8),
+            CarmanButton(
+              label: 'Esperar conductor',
+              variant: CarmanButtonVariant.outline,
+              onPressed: () => _act(context, ref,
+                  () => (ref.read(bookingRepositoryProvider) as ApiBookingRepository)
+                      .decideWithoutDriver(reservation.id, 'Esperar')),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (AppConfig.useLiveApi && reservation.canOperate &&
+              (reservation.status == ReservationStatus.confirmed ||
+               reservation.status == ReservationStatus.active)) ...[
+            CarmanButton(
+              label: reservation.status == ReservationStatus.confirmed
+                  ? 'Iniciar servicio' : 'Finalizar servicio',
+              onPressed: () => _act(context, ref,
+                  () => (ref.read(bookingRepositoryProvider) as ApiBookingRepository)
+                      .transition(reservation.id,
+                          finish: reservation.status == ReservationStatus.active)),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (reservation.status == ReservationStatus.confirmed ||
+              (AppConfig.useLiveApi &&
+                  reservation.status == ReservationStatus.pendingPayment)) ...[
+            if (AppConfig.useLiveApi || reservation.isCancellable)
               CarmanButton(
                 label: 'Cancelar reserva',
                 variant: CarmanButtonVariant.danger,
@@ -217,13 +269,17 @@ class TripDetailScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               reservation.isCancellable
-                  ? 'Cancelación gratuita hasta 24 h antes del inicio.'
-                  : 'La reserva ya está dentro del período de cancelación con cargo.',
+                  ? (AppConfig.useLiveApi
+                      ? 'Sin pagos iniciados, consulta el estado antes de cancelar.'
+                      : 'Cancelación gratuita hasta 24 h antes del inicio.')
+                  : (AppConfig.useLiveApi
+                      ? 'Consulta las condiciones de cancelación de tu reserva.'
+                      : 'La reserva ya está dentro del período de cancelación con cargo.'),
               textAlign: TextAlign.center,
               style: AppTheme.bodySm.copyWith(fontSize: 9.5),
             ),
           ] else if (reservation.status == ReservationStatus.completed) ...[
-            CarmanButton(
+              if (!AppConfig.useLiveApi || reservation.canReview) CarmanButton(
               label: reservation.hasReview
                   ? 'Reseña enviada'
                   : 'Dejar una reseña',
@@ -232,8 +288,9 @@ class TripDetailScreen extends ConsumerWidget {
                   ? null
                   : () => _review(context, ref, reservation),
             ),
-            const SizedBox(height: 8),
-            CarmanButton(
+              if (!AppConfig.useLiveApi || reservation.canReview)
+                const SizedBox(height: 8),
+             if (!AppConfig.useLiveApi) CarmanButton(
               label: 'Descargar factura',
               variant: CarmanButtonVariant.outline,
               icon: Icons.download_rounded,
@@ -252,7 +309,7 @@ class TripDetailScreen extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: 16),
-          Center(
+          if (!AppConfig.useLiveApi) Center(
             child: TextButton(
               onPressed: () => showCarmanSnack(
                 context,
@@ -267,6 +324,28 @@ class TripDetailScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _act(BuildContext context, WidgetRef ref,
+      Future<Reservation> Function() action) async {
+    try {
+      await action();
+      if (!context.mounted) return;
+      await ref.read(tripsControllerProvider.notifier).refresh();
+      if (context.mounted) {
+        showCarmanSnack(context, 'Estado consultado en el servidor.',
+            kind: SnackKind.success);
+      }
+    } catch (_) {
+      if (context.mounted) {
+        await ref.read(tripsControllerProvider.notifier).refresh();
+        if (context.mounted) {
+          showCarmanSnack(context,
+              'No se pudo confirmar el resultado. Consulta el estado antes de reintentar.',
+              kind: SnackKind.error);
+        }
+      }
+    }
+  }
+
   Future<void> _cancel(
     BuildContext context,
     WidgetRef ref,
@@ -275,7 +354,9 @@ class TripDetailScreen extends ConsumerWidget {
     final confirmed = await showConfirmDialog(
       context,
       title: '¿Cancelar tu reserva?',
-      message: 'Se reembolsará el importe completo a tu método de pago en un plazo de 3 a 5 días hábiles.',
+      message: AppConfig.useLiveApi
+          ? 'La reserva se cancelará si no tiene pagos en proceso o aprobados.'
+          : 'Se reembolsará el importe completo a tu método de pago en un plazo de 3 a 5 días hábiles.',
       confirmLabel: 'Sí, cancelar',
       destructive: true,
       icon: Icons.cancel_outlined,
@@ -288,8 +369,10 @@ class TripDetailScreen extends ConsumerWidget {
     showCarmanSnack(
       context,
       success
-          ? 'Reserva cancelada. El reembolso se procesará automáticamente.'
-          : 'No pudimos cancelar la reserva.',
+          ? (AppConfig.useLiveApi
+              ? 'Reserva cancelada.' : 'Reserva cancelada. El reembolso se procesará automáticamente.')
+           : ref.read(tripsControllerProvider).error ??
+               'No pudimos cancelar la reserva.',
       kind: success ? SnackKind.success : SnackKind.error,
     );
   }

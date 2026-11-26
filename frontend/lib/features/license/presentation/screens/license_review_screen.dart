@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../data/models/user_profile.dart';
@@ -20,6 +21,42 @@ class LicenseReviewScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final license = ref.watch(licenseControllerProvider);
+    if (AppConfig.useLiveApi) {
+      return Scaffold(
+        backgroundColor: AppColors.canvas,
+        appBar: CarmanTopBar(
+          title: 'Estado de la licencia',
+          onBack: () => context.go('/profile'),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: CarmanCard(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(license.status.icon, color: license.status.color, size: 38),
+                  const SizedBox(height: 12),
+                  Text(license.status.label, style: AppTheme.headlineSm),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Este estado proviene de tu perfil. La carga segura de '
+                    'documentos y los plazos de revisión aún no están disponibles.',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.bodySm,
+                  ),
+                  const SizedBox(height: 18),
+                  CarmanButton(
+                    label: 'Volver al perfil',
+                    onPressed: () => context.go('/profile'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     final draft = ref.watch(bookingControllerProvider).draft;
     final isApproved = license.status == LicenseStatus.approved;
     final isPending = license.status == LicenseStatus.pendingReview;

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/vehicle.dart';
 import '../../../data/models/vehicle_query.dart';
+import '../../../data/repositories/vehicle_repository.dart';
 import '../../../providers.dart';
 
 class CatalogState {
@@ -11,12 +12,18 @@ class CatalogState {
     this.vehicles = const [],
     this.isLoading = true,
     this.error,
+    this.hasMore = false,
+    this.isLoadingMore = false,
+    this.page = 1,
   });
 
   final VehicleQuery query;
   final List<Vehicle> vehicles;
   final bool isLoading;
   final String? error;
+  final bool hasMore;
+  final bool isLoadingMore;
+  final int page;
 
   int get count => vehicles.length;
 
@@ -26,12 +33,18 @@ class CatalogState {
     bool? isLoading,
     String? error,
     bool clearError = false,
+    bool? hasMore,
+    bool? isLoadingMore,
+    int? page,
   }) {
     return CatalogState(
       query: query ?? this.query,
       vehicles: vehicles ?? this.vehicles,
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
+      hasMore: hasMore ?? this.hasMore,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      page: page ?? this.page,
     );
   }
 }
@@ -53,7 +66,8 @@ class CatalogController extends Notifier<CatalogState> {
     if (query.city != state.query.city) {
       await ref.read(sessionStoreProvider).saveCity(query.city);
     }
-    state = state.copyWith(query: query, isLoading: true, clearError: true);
+    state = state.copyWith(query: query, vehicles: const [], isLoading: true,
+        hasMore: false, page: 1, clearError: true);
     await _fetch(query, showLoading: false);
   }
 
@@ -66,11 +80,7 @@ class CatalogController extends Notifier<CatalogState> {
   }
 
   Future<void> setSort(SortOption sort) async {
-    // Sorting is local, so cards reorder instantly.
-    state = state.copyWith(
-      query: state.query.copyWith(sort: sort),
-      vehicles: state.query.copyWith(sort: sort).sortVehicles(state.vehicles),
-    );
+    await updateQuery(state.query.copyWith(sort: sort));
   }
 
   Future<void> setSearchText(String text) async {
@@ -83,12 +93,14 @@ class CatalogController extends Notifier<CatalogState> {
       state = state.copyWith(isLoading: true, clearError: true);
     }
     try {
-      final vehicles = await ref
+      final CatalogPage result = await ref
           .read(vehicleRepositoryProvider)
-          .fetchCatalog(query);
+          .fetchCatalogPage(query, 1);
       if (!ref.mounted || requestId != _requestId) return;
       state = state.copyWith(
-        vehicles: query.sortVehicles(vehicles),
+        vehicles: result.vehicles,
+        hasMore: result.hasMore,
+        page: 1,
         isLoading: false,
         clearError: true,
       );
@@ -101,6 +113,32 @@ class CatalogController extends Notifier<CatalogState> {
         isLoading: false,
         error: 'No pudimos cargar los vehículos. Inténtalo de nuevo.',
       );
+    }
+  }
+
+  Future<void> loadMore() async {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) return;
+    final requestId = _requestId;
+    final query = state.query;
+    final page = state.page + 1;
+    state = state.copyWith(isLoadingMore: true, clearError: true);
+    try {
+      final result = await ref.read(vehicleRepositoryProvider)
+          .fetchCatalogPage(query, page);
+      if (!ref.mounted || requestId != _requestId) return;
+      state = state.copyWith(
+        vehicles: [...state.vehicles, ...result.vehicles],
+        hasMore: result.hasMore,
+        page: page,
+        isLoadingMore: false,
+      );
+    } on AppException catch (error) {
+      if (!ref.mounted || requestId != _requestId) return;
+      state = state.copyWith(isLoadingMore: false, error: error.message);
+    } catch (_) {
+      if (!ref.mounted || requestId != _requestId) return;
+      state = state.copyWith(isLoadingMore: false,
+          error: 'No pudimos cargar más vehículos.');
     }
   }
 }

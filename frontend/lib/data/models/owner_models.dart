@@ -10,7 +10,9 @@ enum OwnerVehicleStatus {
   ),
   rented('Alquilado', Color(0xFF6B38D4), Icons.key_rounded),
   maintenance('Mantenimiento', Color(0xFFB45309), Icons.build_rounded),
-  review('Revisión pendiente', Color(0xFF2563EB), Icons.fact_check_outlined);
+  review('Revisión pendiente', Color(0xFF2563EB), Icons.fact_check_outlined),
+  inactive('Pausado', Color(0xFF525252), Icons.pause_circle_outline_rounded),
+  unknown('Estado no disponible', Color(0xFF525252), Icons.help_outline_rounded);
 
   const OwnerVehicleStatus(this.label, this.color, this.icon);
 
@@ -24,7 +26,8 @@ enum OwnerVehicleStatus {
       'alquilado' || 'rented' || 'en_uso' => rented,
       'en_mantenimiento' || 'mantenimiento' || 'maintenance' => maintenance,
       'revision_pendiente' || 'review' || 'pendiente' => review,
-      _ => available,
+      'inactivo' || 'inactive' => inactive,
+      _ => unknown,
     };
   }
 }
@@ -34,19 +37,25 @@ class OwnerVehicle {
     required this.id,
     required this.vehicleId,
     required this.status,
-    required this.nextService,
+    this.nextService,
     required this.monthlyRevenue,
     required this.tripsThisMonth,
     this.documentsInOrder = true,
+    this.reviewStatus,
+    this.reviewReason,
+    this.rejectionReason,
   });
 
   final String id;
   final String vehicleId;
   final OwnerVehicleStatus status;
-  final DateTime nextService;
+  final DateTime? nextService;
   final double monthlyRevenue;
   final int tripsThisMonth;
   final bool documentsInOrder;
+  final String? reviewStatus;
+  final String? reviewReason;
+  final String? rejectionReason;
 }
 
 class OwnerStats {

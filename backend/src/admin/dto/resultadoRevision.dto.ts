@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class ResultadoRevisionDTO {
 
@@ -27,21 +27,21 @@ export class ResultadoRevisionDTO {
     @MaxLength(50)
     estadoBateria?: string;
 
-    @IsOptional()
     @IsString()
+    @IsNotEmpty()
     @MaxLength(200)
-    observaciones?: string;
+    observaciones: string;
 
     @IsBoolean()
     necesitaMantenimiento: boolean;
 
-    @IsOptional()
     @IsString()
+    @IsNotEmpty()
     @MaxLength(100)
     nombreTecnico: string;
 
-    @IsOptional()
     @IsString()
+    @IsNotEmpty()
     @MaxLength(20)
     documentoTecnico: string;
 

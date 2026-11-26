@@ -16,6 +16,7 @@ abstract final class AppRoutes {
   static const licenseReview = '/license/review';
   static const checkout = '/checkout';
   static const paymentMethods = '/payment-methods';
+  static const paymentHistory = '/payment-history';
   static const bookingSuccess = '/booking/success';
   static const bookingFailed = '/booking/failed';
   static const bookingExpired = '/booking/expired';

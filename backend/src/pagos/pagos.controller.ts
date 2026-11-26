@@ -1,8 +1,9 @@
-import { Controller, Post, Param, ParseIntPipe, UseGuards, Req, Body, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Param, ParseIntPipe, UseGuards, Req, Body, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { PagosService } from './pagos.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { WompiService } from './wompi.service';
 import type { EventoWompi } from './wompi.service';
+import { PositiveIdPipe } from '../common/positive-id.pipe';
 
 interface SolicitudAutenticada {
     user: {
@@ -18,13 +19,20 @@ export class PagosController {
 
     @UseGuards(AuthGuard)
     @Post('reservas/:idReserva/orden')
-    generarOrdenPago(@Req() request: any, @Param('idReserva', ParseIntPipe) idReserva: number) {
+    generarOrdenPago(@Req() request: any, @Param('idReserva', PositiveIdPipe) idReserva: number) {
         return this.pagosService.generarOrdenPago(request.user.idPersona, idReserva);
     }
 
     @UseGuards(AuthGuard)
+    @Get('reservas/:idReserva/orden')
+    consultarOrden(@Req() request: SolicitudAutenticada,
+        @Param('idReserva', PositiveIdPipe) idReserva: number) {
+        return this.pagosService.consultarOrdenReserva(request.user.idPersona, idReserva);
+    }
+
+    @UseGuards(AuthGuard)
     @Post('ordenes/:idOrdenPago/checkout')
-    iniciarCheckout(@Req() request: SolicitudAutenticada, @Param('idOrdenPago', ParseIntPipe) idOrdenPago: number,) {
+    iniciarCheckout(@Req() request: SolicitudAutenticada, @Param('idOrdenPago', PositiveIdPipe) idOrdenPago: number,) {
         return this.pagosService.iniciarPago(request.user.idPersona, idOrdenPago,);
     }
 
@@ -40,5 +48,9 @@ export class PagosController {
         return this.pagosService.procesarEventoWompi(evento);
     }
 
-
+    @UseGuards(AuthGuard)
+    @Get('historial')
+    obtenerHistorialPagos(@Req() request: SolicitudAutenticada) {
+        return this.pagosService.obtenerHistorialPagos(request.user.idPersona);
+    }
 }

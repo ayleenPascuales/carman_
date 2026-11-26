@@ -25,20 +25,24 @@ class ApiProfileRepository implements ProfileRepository {
     UserProfile current,
     ProfileUpdate update,
   ) async {
+    if (update.phone.trim() != current.phone) {
+      throw const AppException(
+        'El cambio de teléfono necesita una verificación adicional que aún no está disponible.',
+        code: 'phone_verification_required',
+      );
+    }
     await _api.patch(
       ApiEndpoints.profile,
       token: _token(),
       body: {
         'nombre': update.firstName.trim(),
         'apellido': update.lastName.trim(),
-        'telefono': update.phone.trim(),
         'ciudad': update.city,
       },
     );
     return current.copyWith(
       firstName: update.firstName.trim(),
       lastName: update.lastName.trim(),
-      phone: update.phone.trim(),
       city: update.city,
     );
   }
@@ -71,12 +75,22 @@ class ApiProfileRepository implements ProfileRepository {
         code: 'driver_license_required',
       );
     }
+    if (role != UserRole.driver) {
+      throw const AppException('Este rol no puede activarse desde esta operación.',
+          code: 'unsupported_role');
+    }
     await _api.post(
       ApiEndpoints.roles,
       token: _token(),
-      body: {'roles': role.label},
+      body: const <String, dynamic>{},
     );
-    return current.copyWith(roles: {...current.roles, role});
+    final profile = await _api.get(ApiEndpoints.profile, token: _token());
+    final roles = profile['roles'];
+    if (roles is! Map<String, dynamic> || roles['conductor'] != true) {
+      throw const AppException('El rol aún no aparece en tu perfil. Actualiza la sesión.',
+          code: 'role_not_confirmed');
+    }
+    return current.copyWith(roles: {...current.roles, UserRole.driver});
   }
 
   @override
@@ -86,8 +100,7 @@ class ApiProfileRepository implements ProfileRepository {
       ids.map((id) async {
         try {
           final payload = await _api.get(
-            ApiEndpoints.vehicle(id),
-            token: _token(),
+            ApiEndpoints.publicVehicle(id),
           );
           final raw = payload['vehiculo'] ?? payload['data'] ?? payload;
           if (raw is Map<String, dynamic>) return Vehicle.fromJson(raw);

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from "@nestjs/common";
+import { Injectable, Inject, NotFoundException, BadRequestException } from "@nestjs/common";
 import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 interface Documento extends RowDataPacket {
@@ -53,11 +53,16 @@ export class ArchivosService {
         };
     }
 
-    async obtenerPDF(idDocumento: number) {
+    async obtenerPDF(idDocumento: number, idPersona: number) {
         const [documentos] = await this.db.query<Documento[]>(
-            `SELECT idDocumento, nombreArchivo, tipoDocumento,
-            contenido, tablaOrigen, idOrigen FROM documento
-            WHERE idDocumento = ?`, [idDocumento],
+            `SELECT d.idDocumento, d.nombreArchivo, d.tipoDocumento, d.contenido
+            FROM documento d
+            INNER JOIN orden_de_pago op
+                ON d.tablaOrigen = 'orden_de_pago' AND d.idOrigen = op.idOrdenPago
+            INNER JOIN reserva r ON r.idReserva = op.idReserva
+            INNER JOIN cliente c ON c.idCliente = r.idCliente
+            WHERE d.idDocumento = ? AND d.tipoDocumento = 'Orden_Pago'
+            AND c.idPersona = ?`, [idDocumento, idPersona],
         );
         if (documentos.length === 0) {
             throw new NotFoundException('El documento no existe.');

@@ -9,11 +9,12 @@ abstract interface class BookingRepository {
   Future<Reservation> createReservation({
     required BookingDraft draft,
     required PaymentMethod paymentMethod,
+    bool requestDriver = false,
   });
 
   Future<Reservation> cancelReservation(String id);
 
-  Future<Reservation> submitReview({
+  Future<void> submitReview({
     required String id,
     required int rating,
     required String comment,
@@ -36,6 +37,7 @@ class DemoBookingRepository implements BookingRepository {
   Future<Reservation> createReservation({
     required BookingDraft draft,
     required PaymentMethod paymentMethod,
+    bool requestDriver = false,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 1600));
 
@@ -90,7 +92,7 @@ class DemoBookingRepository implements BookingRepository {
   }
 
   @override
-  Future<Reservation> submitReview({
+  Future<void> submitReview({
     required String id,
     required int rating,
     required String comment,
@@ -107,6 +109,5 @@ class DemoBookingRepository implements BookingRepository {
     }
     final reviewed = _reservations[index].copyWith(hasReview: true);
     _reservations[index] = reviewed;
-    return reviewed;
   }
 }

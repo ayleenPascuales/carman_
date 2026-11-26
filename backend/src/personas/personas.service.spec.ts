@@ -3,8 +3,12 @@ import { PersonasService } from './personas.service';
 import { AuthService } from '../auth/auth.service';
 import { ConflictException } from '@nestjs/common';
 import { ServiceUnavailableException } from '@nestjs/common';
-import { Rol, type RegistroInicialDto } from './dto/registroInicial.dto';
+import { Rol, RegistroInicialDto } from './dto/registroInicial.dto';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { VerificationService } from '../auth/verification.service';
+import { ReservasService } from '../reservas/reservas.service';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 describe('PersonasService', () => {
   let service: PersonasService;
@@ -30,6 +34,12 @@ describe('PersonasService', () => {
     enviarCorreoInicial: jest.fn().mockResolvedValue(undefined),
     enviarCodigo: jest.fn().mockResolvedValue(undefined),
   };
+  const reservas = {
+    buscarYasignarConductor: jest.fn().mockResolvedValue({ reservasAsignadas: [] }),
+  };
+  const notificaciones = {
+    avisarPersona: jest.fn().mockResolvedValue(undefined),
+  };
   const registration: RegistroInicialDto = {
     roles: Rol.CLIENTE,
     persona: {
@@ -54,6 +64,8 @@ describe('PersonasService', () => {
         { provide: 'DATABASE_CONNECTION', useValue: database },
         { provide: AuthService, useValue: auth },
         { provide: VerificationService, useValue: verification },
+        { provide: ReservasService, useValue: reservas },
+        { provide: NotificacionesService, useValue: notificaciones },
       ],
     }).compile();
 
@@ -62,6 +74,48 @@ describe('PersonasService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('rechaza sin crear cuenta registros sin persona o con persona nula, array o vacía', () => {
+    for (const persona of [undefined, null, [], {}]) {
+      const body = plainToInstance(RegistroInicialDto, { roles: Rol.CLIENTE, persona });
+      expect(validateSync(body).length).toBeGreaterThan(0);
+    }
+    expect(auth.crearCuenta).not.toHaveBeenCalled();
+  });
+
+  it('no divulga reservas asignadas a otros conductores al activar disponibilidad', async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM conductor WHERE')) return [[{ idConductor: 7 }]];
+      if (sql.includes('FROM licencia WHERE')) return [[{ idLicencia: 3 }]];
+      return [{ affectedRows: 1 }];
+    });
+    database.execute.mockResolvedValueOnce([[{ idConductor: 7 }]]);
+    reservas.buscarYasignarConductor.mockResolvedValueOnce({
+      reservasAsignadas: [
+        { idReserva: 8, idConductor: 7 },
+        { idReserva: 9, idConductor: 11 },
+      ],
+    });
+    await expect(service.actualizarDisponibilidadConductor(4, {
+      disponibilidad: true,
+    })).resolves.toMatchObject({ reservasAsignadas: [8] });
+  });
+
+  it('informa éxito del cambio aunque falle la búsqueda posterior al commit', async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM conductor WHERE')) return [[{ idConductor: 7 }]];
+      if (sql.includes('FROM licencia WHERE')) return [[{ idLicencia: 3 }]];
+      return [{ affectedRows: 1 }];
+    });
+    reservas.buscarYasignarConductor.mockRejectedValueOnce(new Error('búsqueda fallida'));
+    await expect(service.actualizarDisponibilidadConductor(4, {
+      disponibilidad: true,
+    })).resolves.toMatchObject({
+      disponibilidad: true, reservasAsignadas: [],
+      advertencia: expect.any(String),
+    });
+    expect(connection.commit).toHaveBeenCalledTimes(1);
   });
 
   it('registra el UID Firebase y confirma TiDB en la misma operación lógica', async () => {
@@ -191,5 +245,66 @@ describe('PersonasService', () => {
       licenciaEstado: 'Vigente',
       roles: { cliente: true, propietario: false, conductor: false, administrador: true },
     });
+  });
+
+  it('agrega únicamente el rol de conductor con la licencia vigente existente', async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM persona WHERE')) return [[{ idPersona: 42 }]];
+      if (sql.includes('FROM conductor WHERE')) return [[]];
+      if (sql.includes('FROM licencia WHERE idPersona')) {
+        return [[{ idLicencia: 7, estado: 'Vigente', fechaExpiracion: '2099-01-01' }]];
+      }
+      return [{ insertId: 18 }];
+    });
+
+    await expect(service.agregarRol(42, {})).resolves.toMatchObject({
+      idPersona: 42, idConductor: 18, rol: 'Conductor',
+    });
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO conductor'), [42],
+    );
+    expect(connection.execute).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO cliente'), expect.anything(),
+    );
+    expect(connection.execute).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO vehiculo'), expect.anything(),
+    );
+    expect(connection.commit).toHaveBeenCalledTimes(1);
+    expect(connection.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('registra la licencia antes de agregar el rol conductor', async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM persona WHERE')) return [[{ idPersona: 42 }]];
+      if (sql.includes('FROM conductor WHERE') || sql.includes('FROM licencia WHERE')) return [[]];
+      return [{ insertId: 18 }];
+    });
+
+    await service.agregarRol(42, {
+      licencia: {
+        numeroDocumento: 'LIC123', fechaExpiracion: '2099-01-01',
+        tipoLicencia: 'B1', fotoLicencia: 'https://example.com/licencia.jpg',
+      },
+    });
+    const sentencias = connection.execute.mock.calls.map(([sql]: [string]) => sql);
+    expect(sentencias.findIndex((sql: string) => sql.includes('INSERT INTO licencia')))
+      .toBeLessThan(sentencias.findIndex((sql: string) => sql.includes('INSERT INTO conductor')));
+    expect(connection.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('no agrega el rol conductor con licencia suspendida', async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM persona WHERE')) return [[{ idPersona: 42 }]];
+      if (sql.includes('FROM conductor WHERE')) return [[]];
+      if (sql.includes('FROM licencia WHERE idPersona')) {
+        return [[{ idLicencia: 7, estado: 'Suspendida', fechaExpiracion: '2099-01-01' }]];
+      }
+      return [[]];
+    });
+
+    await expect(service.agregarRol(42, {})).rejects.toThrow('licencia esta suspendida');
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(connection.rollback).toHaveBeenCalledTimes(1);
+    expect(connection.release).toHaveBeenCalledTimes(1);
   });
 });

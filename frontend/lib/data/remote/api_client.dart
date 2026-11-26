@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 
 import 'package:http/http.dart' as http;
 
@@ -57,6 +56,55 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, dynamic>> put(
+    String path, {
+    Object? body,
+    String? token,
+  }) async {
+    final uri = Uri.parse('$_baseUrl$path');
+    return _send(
+      () => _client.put(
+        uri,
+        headers: _headers(token),
+        body: jsonEncode(body ?? const <String, dynamic>{}),
+      ),
+    );
+  }
+
+  Future<List<int>> getBytes(String path, {required String token}) async {
+    final uri = Uri.parse('$_baseUrl$path');
+    try {
+      final response = await _client.get(uri, headers: {
+        'Accept': 'application/pdf',
+        'Authorization': 'Bearer $token',
+      }).timeout(const Duration(seconds: 12));
+      if (response.statusCode == 401) {
+        throw const AuthException('La sesión expiró.', code: 'http_401');
+      }
+      if (response.statusCode == 403) {
+        throw const AuthException('No tienes permiso para ver este archivo.', code: 'http_403');
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw AppException('No se pudo descargar el archivo.',
+            code: 'http_${response.statusCode}');
+      }
+      if (!response.headers['content-type'].toString().toLowerCase().contains('application/pdf')) {
+        throw const AppException('El archivo recibido no es un PDF.',
+            code: 'invalid_response');
+      }
+      return response.bodyBytes;
+    } on TimeoutException {
+      throw const NetworkException(isTimeout: true);
+    } on http.ClientException {
+      throw const NetworkException();
+    }
+  }
+
+  Future<Map<String, dynamic>> delete(String path, {String? token}) async {
+    final uri = Uri.parse('$_baseUrl$path');
+    return _send(() => _client.delete(uri, headers: _headers(token)));
+  }
+
   Map<String, String> _headers(String? token) => {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -84,13 +132,13 @@ class ApiClient {
           _extractMessage(payload) ??
           'La operación no pudo completarse (${response.statusCode}).';
       if (response.statusCode == 401 || response.statusCode == 403) {
-        throw AuthException(message);
+        throw AuthException(message, code: 'http_${response.statusCode}');
       }
       throw AppException(message, code: 'http_${response.statusCode}');
     } on TimeoutException {
       throw const NetworkException(isTimeout: true);
-    } on http.ClientException catch (error) {
-      developer.log('Network error: $error', name: 'carman.api');
+    } on http.ClientException {
+      // Las URL de cercanía pueden incluir coordenadas: nunca registrarlas.
       throw const NetworkException();
     } on FormatException {
       throw const AppException(

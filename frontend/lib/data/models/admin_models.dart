@@ -5,7 +5,9 @@ import 'user_profile.dart';
 enum AdminUserStatus {
   active('Activo', Color(0xFF0E8A75)),
   pending('Pendiente', Color(0xFFB45309)),
-  suspended('Suspendido', Color(0xFFBA1A1A));
+  suspended('Suspendido', Color(0xFFBA1A1A)),
+  inactive('Inactivo', Color(0xFF525252)),
+  unknown('Estado no disponible', Color(0xFF525252));
 
   const AdminUserStatus(this.label, this.color);
 
@@ -20,7 +22,9 @@ enum AdminUserStatus {
     if (normalized.contains('pend') || normalized.contains('revision')) {
       return pending;
     }
-    return active;
+    if (normalized == 'activo' || normalized == 'active') return active;
+    if (normalized == 'inactivo' || normalized == 'inactive') return inactive;
+    return unknown;
   }
 }
 
@@ -37,6 +41,7 @@ class AdminUser {
     required this.trips,
     this.verified = true,
     this.avatarAsset,
+    this.isAdmin = false,
   });
 
   final String id;
@@ -50,6 +55,7 @@ class AdminUser {
   final int trips;
   final bool verified;
   final String? avatarAsset;
+  final bool isAdmin;
 
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -80,6 +86,7 @@ class AdminUser {
       trips: trips,
       verified: verified,
       avatarAsset: avatarAsset,
+      isAdmin: isAdmin,
     );
   }
 }
@@ -98,7 +105,7 @@ enum AdminApprovalType {
   }
 }
 
-enum AdminApprovalStatus { pending, approved, rejected }
+enum AdminApprovalStatus { pending, approved, rejected, finalized }
 
 class AdminApproval {
   const AdminApproval({
@@ -108,7 +115,7 @@ class AdminApproval {
     required this.subjectEmail,
     required this.title,
     required this.detail,
-    required this.submittedAt,
+    this.submittedAt,
     this.status = AdminApprovalStatus.pending,
     this.avatarAsset,
   });
@@ -119,7 +126,7 @@ class AdminApproval {
   final String subjectEmail;
   final String title;
   final String detail;
-  final DateTime submittedAt;
+  final DateTime? submittedAt;
   final AdminApprovalStatus status;
   final String? avatarAsset;
 
@@ -183,21 +190,37 @@ class AdminDashboardData {
     required this.stats,
     required this.users,
     required this.approvals,
+    this.usersPage = 1,
+    this.usersHasMore = false,
+    this.revisionsPage = 1,
+    this.revisionsHasMore = false,
   });
 
   final AdminStats stats;
   final List<AdminUser> users;
   final List<AdminApproval> approvals;
+  final int usersPage;
+  final bool usersHasMore;
+  final int revisionsPage;
+  final bool revisionsHasMore;
 
   AdminDashboardData copyWith({
     AdminStats? stats,
     List<AdminUser>? users,
     List<AdminApproval>? approvals,
+    int? usersPage,
+    bool? usersHasMore,
+    int? revisionsPage,
+    bool? revisionsHasMore,
   }) {
     return AdminDashboardData(
       stats: stats ?? this.stats,
       users: users ?? this.users,
       approvals: approvals ?? this.approvals,
+      usersPage: usersPage ?? this.usersPage,
+      usersHasMore: usersHasMore ?? this.usersHasMore,
+      revisionsPage: revisionsPage ?? this.revisionsPage,
+      revisionsHasMore: revisionsHasMore ?? this.revisionsHasMore,
     );
   }
 }

@@ -178,16 +178,24 @@ class VehicleQuery {
   Map<String, dynamic> toApiJson() => {
     'ciudad': city,
     'categoria': category.name,
-    'modalidad': mode.name,
-    'fechaInicio': startAt?.toIso8601String(),
-    'fechaFin': endAt?.toIso8601String(),
+    'fechaInicio': startAt == null ? null : _apiDate(startAt!),
+    'fechaFin': endAt == null ? null : _apiDate(endAt!),
     'precioMaximo': maxPrice,
-    'transmision': transmission?.name,
-    'combustible': fuel?.name,
     'plazasMinimas': minSeats,
-    'aperturaMovil': instantBookOnly,
-    'cancelacionGratis': freeCancellationOnly,
-    'orden': sort.name,
+    'orden': switch (sort) {
+      SortOption.priceAsc => 'priceAsc',
+      SortOption.priceDesc => 'priceDesc',
+      _ => 'relevance',
+    },
     'texto': text,
   };
+
+  String _apiDate(DateTime value) {
+    final date = '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+    final time = '${value.hour.toString().padLeft(2, '0')}:'
+        '${value.minute.toString().padLeft(2, '0')}:00';
+    return '${date}T$time';
+  }
 }

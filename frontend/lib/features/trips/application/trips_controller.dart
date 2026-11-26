@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/booking.dart';
 import '../../../providers.dart';
+import '../../auth/application/auth_controller.dart';
 
 enum TripsTab { upcoming, history, cancelled }
 
@@ -80,23 +81,27 @@ class TripsState {
 class TripsController extends Notifier<TripsState> {
   @override
   TripsState build() {
+    final id = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
+    if (id == null) return const TripsState(reservations: [], isLoading: false);
     Future.microtask(refresh);
     return const TripsState();
   }
 
   Future<void> refresh() async {
+    final accountId = ref.read(authControllerProvider).user?.id;
+    if (accountId == null) return;
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final reservations = await ref
           .read(bookingRepositoryProvider)
           .fetchReservations();
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(reservations: reservations, isLoading: false);
     } on AppException catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(isLoading: false, error: error.message);
     } catch (_) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(
         isLoading: false,
         error: 'No pudimos cargar tus reservas.',
@@ -150,11 +155,12 @@ class TripsController extends Notifier<TripsState> {
   }) async {
     state = state.copyWith(actionInProgress: true, clearError: true);
     try {
-      final reviewed = await ref
+      await ref
           .read(bookingRepositoryProvider)
           .submitReview(id: id, rating: rating, comment: comment);
       final updated = state.reservations
-          .map((reservation) => reservation.id == id ? reviewed : reservation)
+          .map((reservation) => reservation.id == id
+              ? reservation.copyWith(hasReview: true) : reservation)
           .toList();
       state = state.copyWith(reservations: updated, actionInProgress: false);
       return true;

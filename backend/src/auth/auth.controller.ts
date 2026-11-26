@@ -6,6 +6,7 @@ import { AdminGuard } from "./admin.guard";
 import { DeliveryError, VerificationService } from './verification.service';
 import { AllowUnverified } from './allow-unverified.decorator';
 import { ConfirmarTelefonoDto } from './dto/confirmar-telefono.dto';
+import { SolicitarRecuperacionDto } from './dto/solicitar-recuperacion.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -30,6 +31,13 @@ export class AuthController {
             dto.identificador,
             dto.contrasena,
         )
+    }
+
+    @Post('password/solicitar-recuperacion')
+    async solicitarRecuperacion(@Body() dto: SolicitarRecuperacionDto) {
+        await this.registrarFalloEnvio(() =>
+            this.verification.solicitarRecuperacion(dto.email));
+        return { mensaje: 'Si existe una cuenta para ese correo, se enviará un enlace de recuperación.' };
     }
 
     @Get('verificacion')

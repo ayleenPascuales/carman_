@@ -8,6 +8,9 @@ async function main() {
   for (const key of ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']) {
     if (!process.env[key]) throw new Error(`Falta ${key}`);
   }
+  if (process.env.DB_NAME.toLowerCase() === 'carmandb') {
+    throw new Error('Migración prohibida sobre carmandb. Utiliza una base de ensayo aislada.');
+  }
   const { host, port, user, password, database, ssl, connectTimeout } =
     databaseOptions(process.env);
   const db = await createConnection({ host, port, user, password, database, ssl, connectTimeout });
@@ -36,6 +39,10 @@ async function main() {
     const versions = new Map(applied.map((row) => [row.name, row.checksum]));
     const directory = join(__dirname, '..', 'migrations');
     for (const name of readdirSync(directory).filter((file) => /^\d+_.*\.sql$/.test(file)).sort()) {
+      if (name === '003_ubicacion_compartida.sql' && process.env.CARMAN_ENABLE_LOCATION_MIGRATION !== 'true') {
+        console.log('Migración optativa de ubicación omitida (no hay consentimiento de despliegue).');
+        continue;
+      }
       const sql = readFileSync(join(directory, name), 'utf8');
       const checksum = createHash('sha256').update(sql).digest('hex');
       if (versions.has(name)) {

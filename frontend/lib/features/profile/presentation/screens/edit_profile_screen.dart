@@ -211,8 +211,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               label: 'Teléfono',
               prefixIcon: Icons.phone_iphone_rounded,
               keyboardType: TextInputType.phone,
+              enabled: !AppConfig.useLiveApi,
               validator: Validators.phone,
             ),
+            if (AppConfig.useLiveApi) ...[
+              const SizedBox(height: 6),
+              Text(
+                'El teléfono verificado no se puede cambiar hasta habilitar la reverificación.',
+                style: AppTheme.bodySm.copyWith(color: AppColors.secondaryText),
+              ),
+            ],
             const SizedBox(height: 14),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,

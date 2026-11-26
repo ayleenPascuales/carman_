@@ -4,9 +4,10 @@ import { PersonasService } from './personas.service';
 import { DatabaseModule } from '../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { ReservasModule } from '../reservas/reservas.module';
+import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, ReservasModule],
+  imports: [DatabaseModule, AuthModule, ReservasModule, NotificacionesModule],
   controllers: [PersonasController],
   providers: [PersonasService]
 })

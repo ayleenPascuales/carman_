@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/validators.dart';
@@ -63,6 +64,31 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
+    if (AppConfig.useLiveApi) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        appBar: CarmanTopBar(onBack: () => context.go('/forgot-password')),
+        body: MaxWidthContent(
+          maxWidth: 500,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Enlace de recuperación', style: AppTheme.headlineLg),
+              const SizedBox(height: 12),
+              Text(
+                'Solicita el enlace por correo y sigue las instrucciones del proveedor de autenticación.',
+                style: AppTheme.bodySm,
+              ),
+              const SizedBox(height: 20),
+              CarmanButton(
+                label: 'Solicitar enlace',
+                onPressed: () => context.go('/forgot-password'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.surface,
       appBar: CarmanTopBar(

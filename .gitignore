@@ -27,3 +27,9 @@ Thumbs.db
 .vercel
 .env*
 /descarga_tidb/
+/squemas y tablas/
+/docs/evidencia_privada/
+# DOCX de un borrador anterior bloqueados por el sistema; usar DOCX_FINAL.
+/docs/entrega/Informe_Proyecto_Aula.docx
+/docs/entrega/Manual_Tecnico_CARMAN.docx
+/docs/entrega/Manual_Usuario_CARMAN.docx

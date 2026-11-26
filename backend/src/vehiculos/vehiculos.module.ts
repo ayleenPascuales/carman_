@@ -3,9 +3,10 @@ import { VehiculosController } from './vehiculos.controller';
 import { VehiculosService } from './vehiculos.service';
 import { DatabaseModule } from '../database/database.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule],
+    imports: [DatabaseModule, AuthModule, NotificacionesModule],
   controllers: [VehiculosController],
   providers: [VehiculosService]
 })

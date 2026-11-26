@@ -1,6 +1,6 @@
 import { databaseOptions } from './database.config';
 
-describe('Conexión MySQL TiDB', () => {
+describe('Config de base de ensayo', () => {
   it('usa TLS verificado y un pool pequeño reutilizable', () => {
     const config = databaseOptions({
       DB_HOST: 'example.tidbcloud.com',
@@ -30,5 +30,20 @@ describe('Conexión MySQL TiDB', () => {
       ca: expect.stringContaining('-----BEGIN CERTIFICATE-----'),
       rejectUnauthorized: true,
     });
+  });
+
+  it('solo permite deshabilitar TLS en la base local aislada', () => {
+    expect(databaseOptions({
+      DB_HOST: '127.0.0.1', DB_NAME: 'carman_ensayo',
+      DB_SSL_MODE: 'DISABLED',
+    }).ssl).toBeUndefined();
+    expect(() => databaseOptions({
+      DB_HOST: 'cluster.example', DB_NAME: 'carmandb',
+      DB_SSL_MODE: 'DISABLED',
+    })).toThrow(/ensayo local/);
+    expect(() => databaseOptions({
+      DB_HOST: '127.0.0.1', DB_NAME: 'carmandb',
+      DB_SSL_MODE: 'DISABLED',
+    })).toThrow(/ensayo local/);
   });
 });

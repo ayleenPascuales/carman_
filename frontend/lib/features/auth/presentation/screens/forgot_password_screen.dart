@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/validators.dart';
@@ -175,6 +176,14 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           _email.text.trim(),
           style: AppTheme.bodySm.copyWith(fontSize: 12.5),
         ),
+        if (AppConfig.useLiveApi) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Si existe una cuenta, abre el enlace recibido en tu correo. '
+            'Por seguridad, no se puede cambiar la contraseña solo desde esta pantalla.',
+            style: AppTheme.bodySm,
+          ),
+        ],
         const SizedBox(height: 24),
         Row(
           children: [
@@ -191,7 +200,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        CarmanButton(
+        if (!AppConfig.useLiveApi) CarmanButton(
           label: 'Abrir enlace de recuperación',
           icon: Icons.open_in_new_rounded,
           onPressed: () => context.push(

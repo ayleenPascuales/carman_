@@ -16,6 +16,8 @@ enum LicenseStatus {
   notSubmitted('Sin verificar', Color(0xFF525252), Icons.shield_outlined),
   pendingReview('En revisión', Color(0xFFB45309), Icons.hourglass_top_rounded),
   approved('Verificada', Color(0xFF0E8A75), Icons.verified_user_rounded),
+  expired('Vencida', Color(0xFFB45309), Icons.event_busy_outlined),
+  suspended('Suspendida', Color(0xFFBA1A1A), Icons.block_outlined),
   rejected('Rechazada', Color(0xFFBA1A1A), Icons.error_outline_rounded);
 
   const LicenseStatus(this.label, this.color, this.icon);
@@ -27,6 +29,8 @@ enum LicenseStatus {
   static LicenseStatus fromApi(Object? value) {
     return switch ('$value'.toLowerCase()) {
       'vigente' || 'aprobada' || 'approved' => approved,
+      'vencida' || 'expired' => expired,
+      'suspendida' || 'suspended' => suspended,
       'en_revision' || 'pendiente' || 'pending' => pendingReview,
       'rechazada' || 'rejected' => rejected,
       _ => notSubmitted,

@@ -177,6 +177,32 @@ class HomeScreen extends ConsumerWidget {
                                   ),
                             ),
                     ),
+                  if (catalog.vehicles.isNotEmpty && catalog.error != null)
+                    SliverPadding(
+                      padding: EdgeInsets.symmetric(horizontal: side),
+                      sliver: SliverToBoxAdapter(
+                        child: InfoBanner(
+                          title: 'No pudimos actualizar el catálogo',
+                          message: catalog.error!,
+                          color: AppColors.error,
+                          icon: Icons.error_outline_rounded,
+                          compact: true,
+                        ),
+                      ),
+                    ),
+                  if (catalog.hasMore || catalog.isLoadingMore)
+                    SliverToBoxAdapter(
+                      child: Center(
+                        child: TextButton(
+                          onPressed: catalog.isLoadingMore
+                              ? null
+                              : () => ref.read(catalogControllerProvider.notifier)
+                                  .loadMore(),
+                          child: Text(catalog.isLoadingMore
+                              ? 'Cargando…' : 'Ver más vehículos'),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -247,7 +273,11 @@ class HomeScreen extends ConsumerWidget {
             child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 14),
-              children: SortOption.values.map((option) {
+              children: SortOption.values
+                  .where((option) => !AppConfig.useLiveApi ||
+                      (option != SortOption.rating &&
+                          option != SortOption.distance))
+                  .map((option) {
                 final selected = option == current;
                 return ListTile(
                   leading: Icon(

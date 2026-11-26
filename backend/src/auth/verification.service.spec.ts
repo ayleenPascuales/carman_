@@ -6,7 +6,7 @@ import { DeliveryError, VerificationService } from './verification.service';
 
 describe('VerificationService Firebase + textbee', () => {
   const settings: Record<string, string> = {
-    FIREBASE_API_KEY: 'api-key-for-tests',
+    FIREBASE_API_KEY: 'firebase-test-key-not-real-12345',
     TEXTBEE_API_KEY: 'textbee-key-for-tests',
     SMS_OTP_SECRET: 'ab'.repeat(32),
   };
@@ -85,6 +85,23 @@ describe('VerificationService Firebase + textbee', () => {
   });
   afterAll(() => { global.fetch = originalFetch; });
 
+  it('solo autoriza avisos SMS al número que Firebase tiene confirmado', async () => {
+    firebase.getUser.mockResolvedValueOnce({
+      emailVerified: true,
+      phoneNumber: '+573009999999',
+      customClaims: { requiresVerification: false },
+    });
+    await expect(service.telefonoConfirmadoParaAvisos('uid-123', '+573001234567'))
+      .resolves.toBe(false);
+    firebase.getUser.mockResolvedValueOnce({
+      emailVerified: true,
+      phoneNumber: '+573001234567',
+      customClaims: { requiresVerification: true },
+    });
+    await expect(service.telefonoConfirmadoParaAvisos('uid-123', '+573001234567'))
+      .resolves.toBe(true);
+  });
+
   it('envía el correo con el login Firebase y la plantilla VERIFY_EMAIL', async () => {
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({ ok: true, json: async () => ({
@@ -107,6 +124,36 @@ describe('VerificationService Firebase + textbee', () => {
         body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken: 'firebase-id-token' }),
       }),
     );
+  });
+
+  it('consume una sola vez cada respuesta nativa de Firebase, incluido el reenvío', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        localId: 'uid-123', idToken: 'firebase-id-token',
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ email: 'test@example.com' }), { status: 200 }));
+    await expect(service.enviarCorreoInicial('uid-123', 'test@example.com', 'test-password'))
+      .resolves.toBeUndefined();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('solicita recuperación Firebase sin devolver token ni revelar cuentas ausentes', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ email: 'test@example.com' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'EMAIL_NOT_FOUND' },
+      }), { status: 400 }));
+    await expect(service.solicitarRecuperacion(' test@example.com ')).resolves.toBeUndefined();
+    await expect(service.solicitarRecuperacion('missing@example.com')).resolves.toBeUndefined();
+    expect(global.fetch).toHaveBeenNthCalledWith(1,
+      expect.stringContaining('accounts:sendOobCode'),
+      expect.objectContaining({
+        body: JSON.stringify({
+          requestType: 'PASSWORD_RESET', email: 'test@example.com',
+        }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   it('permite reenviar correo con el ID token y registra errores Firebase sin datos privados', async () => {

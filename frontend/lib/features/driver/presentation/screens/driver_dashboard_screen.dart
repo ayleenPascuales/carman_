@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
@@ -17,11 +18,19 @@ import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/application/auth_controller.dart';
 import '../../application/driver_controller.dart';
 
-class DriverDashboardScreen extends ConsumerWidget {
+class DriverDashboardScreen extends ConsumerStatefulWidget {
   const DriverDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DriverDashboardScreen> createState() =>
+      _DriverDashboardScreenState();
+}
+
+class _DriverDashboardScreenState extends ConsumerState<DriverDashboardScreen> {
+  DriverTripStatus? _historyFilter;
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authControllerProvider).user;
     final state = ref.watch(driverControllerProvider);
 
@@ -65,14 +74,15 @@ class DriverDashboardScreen extends ConsumerWidget {
         title: 'Conductor',
         onBack: () => Navigator.of(context).maybePop(),
         actions: [
-          IconButton(
-            onPressed: () => showCarmanSnack(
-              context,
-              'Soporte para conductores: conductores@carman.app',
-              kind: SnackKind.info,
+          if (!AppConfig.useLiveApi)
+            IconButton(
+              onPressed: () => showCarmanSnack(
+                context,
+                'Soporte para conductores: conductores@carman.app',
+                kind: SnackKind.info,
+              ),
+              icon: const Icon(Icons.support_agent_rounded, size: 20),
             ),
-            icon: const Icon(Icons.support_agent_rounded, size: 20),
-          ),
         ],
       ),
       body: RefreshIndicator(
@@ -84,12 +94,50 @@ class DriverDashboardScreen extends ConsumerWidget {
           children: [
             _AvailabilityCard(
               availability: data.availability,
+              enabled:
+                  !state.isChangingAvailability &&
+                  !state.isLoading &&
+                  state.actionTripId == null &&
+                  (!AppConfig.useLiveApi ||
+                      data.licenseValid ||
+                      data.availability != DriverAvailability.offline),
               onChanged: (value) => ref
                   .read(driverControllerProvider.notifier)
                   .setAvailable(value),
             ),
             const SizedBox(height: 10),
-            _DriverStatsBar(stats: data.stats),
+            if (state.error != null) ...[
+              InfoBanner(
+                title: 'No se confirmó el cambio',
+                message: state.error!,
+                color: AppColors.error,
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (!AppConfig.useLiveApi) _DriverStatsBar(stats: data.stats),
+            if (AppConfig.useLiveApi &&
+                data.trips.any(
+                  (trip) => trip.status == DriverTripStatus.unknown,
+                ))
+              const InfoBanner(
+                title: 'Hay servicios con estado no reconocido',
+                message:
+                    'Consulta el detalle de la reserva antes de actuar. '
+                    'No se habilitarán acciones para esos servicios.',
+                color: AppColors.warning,
+              ),
+            if (AppConfig.useLiveApi && !data.licenseValid)
+              InfoBanner(
+                title: 'Licencia no vigente',
+                message:
+                    'Actualiza la licencia desde tu perfil antes de activar '
+                    'la disponibilidad o aceptar un servicio.',
+                color: AppColors.warning,
+                trailing: TextButton(
+                  onPressed: () => context.push('/license'),
+                  child: const Text('Licencia'),
+                ),
+              ),
             if (current != null) ...[
               const SizedBox(height: 22),
               SectionHeader(
@@ -122,7 +170,9 @@ class DriverDashboardScreen extends ConsumerWidget {
                   if (result) {
                     showCarmanSnack(
                       context,
-                      'Servicio completado · ${AppFormatters.money(current.earnings)} abonados.',
+                      AppConfig.useLiveApi
+                          ? 'Servicio finalizado.'
+                          : 'Servicio completado · ${AppFormatters.money(current.earnings)} abonados.',
                       kind: SnackKind.success,
                     );
                   }
@@ -143,7 +193,12 @@ class DriverDashboardScreen extends ConsumerWidget {
               for (final trip in offers) ...[
                 _OfferCard(
                   trip: trip,
-                  isProcessing: state.actionTripId == trip.id,
+                  isProcessing: state.actionTripId != null || state.isLoading,
+                  canAccept:
+                      !AppConfig.useLiveApi ||
+                      (data.licenseValid &&
+                          data.availability == DriverAvailability.online),
+                  onDetail: () => _showTripDetail(context, trip),
                   onAccept: () async {
                     final result = await ref
                         .read(driverControllerProvider.notifier)
@@ -174,10 +229,83 @@ class DriverDashboardScreen extends ConsumerWidget {
                 const SizedBox(height: 10),
               ],
             const SizedBox(height: 20),
-            _EarningsCard(stats: data.stats, trips: state.recentCompleted),
+            if (!AppConfig.useLiveApi)
+              _EarningsCard(stats: data.stats, trips: state.recentCompleted),
+            if (AppConfig.useLiveApi) ...[
+              const SizedBox(height: 12),
+              SectionHeader(
+                title: 'Historial de servicios',
+                count: data.trips
+                    .where(
+                      (trip) =>
+                          trip.status == DriverTripStatus.completed ||
+                          trip.status == DriverTripStatus.cancelled,
+                    )
+                    .length,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final filter in <DriverTripStatus?>[
+                    null,
+                    DriverTripStatus.completed,
+                    DriverTripStatus.cancelled,
+                  ])
+                    ChoiceChip(
+                      label: Text(filter?.label ?? 'Todos'),
+                      selected: _historyFilter == filter,
+                      onSelected: (_) =>
+                          setState(() => _historyFilter = filter),
+                    ),
+                ],
+              ),
+              for (final trip in data.trips.where(
+                (trip) =>
+                    (trip.status == DriverTripStatus.completed ||
+                        trip.status == DriverTripStatus.cancelled) &&
+                    (_historyFilter == null || trip.status == _historyFilter),
+              ))
+                ListTile(
+                  onTap: () => _showTripDetail(context, trip),
+                  title: Text(trip.vehicle.shortTitle),
+                  subtitle: Text(
+                    '${AppFormatters.shortDate(trip.scheduledAt)} · Reserva #${trip.id}',
+                  ),
+                  trailing: StatusBadge(
+                    label: trip.status.label,
+                    color: trip.status.color,
+                    small: true,
+                  ),
+                ),
+              if (data.hasMore)
+                TextButton(
+                  onPressed: state.isLoadingMore
+                      ? null
+                      : () => ref
+                            .read(driverControllerProvider.notifier)
+                            .loadMore(),
+                  child: Text(
+                    state.isLoadingMore
+                        ? 'Cargando historial…'
+                        : 'Cargar más servicios',
+                  ),
+                ),
+              if (!data.hasMore &&
+                  data.trips.every(
+                    (trip) =>
+                        trip.status != DriverTripStatus.completed &&
+                        trip.status != DriverTripStatus.cancelled,
+                  ))
+                const Text(
+                  'Todavía no hay servicios finalizados o cancelados.',
+                ),
+            ],
             const SizedBox(height: 12),
             _DriverDocuments(
-              licenseVerified: user.licenseStatus == LicenseStatus.approved,
+              licenseVerified: AppConfig.useLiveApi
+                  ? data.licenseValid
+                  : user.licenseStatus == LicenseStatus.approved,
             ),
           ],
         ),
@@ -244,20 +372,27 @@ class DriverDashboardScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(
-                trip.notes.isEmpty ? 'Sin notas del cliente.' : trip.notes,
-                style: AppTheme.bodySm.copyWith(fontSize: 10, height: 1.45),
-              ),
-              const SizedBox(height: 18),
-              CarmanButton(
-                label: 'Llamar al cliente',
-                icon: Icons.call_outlined,
-                onPressed: () => showCarmanSnack(
-                  context,
-                  'Llamando a ${trip.clientName}…',
-                  kind: SnackKind.info,
+              if (!AppConfig.useLiveApi)
+                Text(
+                  trip.notes.isEmpty ? 'Sin notas del cliente.' : trip.notes,
+                  style: AppTheme.bodySm.copyWith(fontSize: 10, height: 1.45),
                 ),
-              ),
+              const SizedBox(height: 18),
+              if (AppConfig.useLiveApi)
+                Text(
+                  'Reserva #${trip.id} · ${AppFormatters.shortDate(trip.scheduledAt)}'
+                  '${trip.endsAt == null ? '' : ' a ${AppFormatters.shortDate(trip.endsAt!)}'}',
+                )
+              else
+                CarmanButton(
+                  label: 'Llamar al cliente',
+                  icon: Icons.call_outlined,
+                  onPressed: () => showCarmanSnack(
+                    context,
+                    'Llamando a ${trip.clientName}…',
+                    kind: SnackKind.info,
+                  ),
+                ),
             ],
           ),
         ),
@@ -270,10 +405,12 @@ class _AvailabilityCard extends StatelessWidget {
   const _AvailabilityCard({
     required this.availability,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final DriverAvailability availability;
   final ValueChanged<bool> onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -305,7 +442,9 @@ class _AvailabilityCard extends StatelessWidget {
                   availability == DriverAvailability.onTrip
                       ? 'Termina el servicio para recibir más solicitudes'
                       : availability == DriverAvailability.online
-                      ? 'Recibiendo solicitudes en Cartagena'
+                      ? AppConfig.useLiveApi
+                            ? 'Disponible para servicios según tus reservas'
+                            : 'Recibiendo solicitudes en Cartagena'
                       : 'No recibirás solicitudes',
                   style: AppTheme.bodySm.copyWith(fontSize: 9.5),
                 ),
@@ -314,7 +453,7 @@ class _AvailabilityCard extends StatelessWidget {
           ),
           Switch(
             value: availability != DriverAvailability.offline,
-            onChanged: availability == DriverAvailability.onTrip
+            onChanged: !enabled || availability == DriverAvailability.onTrip
                 ? null
                 : onChanged,
           ),
@@ -340,7 +479,12 @@ class _DriverStatsBar extends StatelessWidget {
           const _StatDivider(),
           _Stat(value: AppFormatters.money(stats.earningsToday), label: 'Hoy'),
           const _StatDivider(),
-          _Stat(value: stats.rating.toStringAsFixed(1), label: 'Valoración'),
+          _Stat(
+            value: AppConfig.useLiveApi && stats.rating == 0
+                ? '—'
+                : stats.rating.toStringAsFixed(1),
+            label: 'Valoración',
+          ),
         ],
       ),
     );
@@ -444,15 +588,16 @@ class _CurrentServiceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: () => showCarmanSnack(
-                  context,
-                  'Llamando a ${trip.clientName}…',
-                  kind: SnackKind.info,
+              if (!AppConfig.useLiveApi)
+                IconButton(
+                  onPressed: () => showCarmanSnack(
+                    context,
+                    'Llamando a ${trip.clientName}…',
+                    kind: SnackKind.info,
+                  ),
+                  icon: const Icon(Icons.call_outlined, size: 18),
+                  visualDensity: VisualDensity.compact,
                 ),
-                icon: const Icon(Icons.call_outlined, size: 18),
-                visualDensity: VisualDensity.compact,
-              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -487,10 +632,11 @@ class _CurrentServiceCard extends StatelessWidget {
                   style: AppTheme.bodySm.copyWith(fontSize: 10.5),
                 ),
               ),
-              Text(
-                AppFormatters.money(trip.earnings),
-                style: AppTheme.labelMd.copyWith(fontSize: 12),
-              ),
+              if (!AppConfig.useLiveApi)
+                Text(
+                  AppFormatters.money(trip.earnings),
+                  style: AppTheme.labelMd.copyWith(fontSize: 12),
+                ),
             ],
           ),
           const SizedBox(height: 14),
@@ -551,12 +697,16 @@ class _OfferCard extends StatelessWidget {
     required this.isProcessing,
     required this.onAccept,
     required this.onDecline,
+    required this.onDetail,
+    this.canAccept = true,
   });
 
   final DriverTrip trip;
   final bool isProcessing;
   final Future<void> Function() onAccept;
   final Future<void> Function() onDecline;
+  final VoidCallback onDetail;
+  final bool canAccept;
 
   @override
   Widget build(BuildContext context) {
@@ -599,13 +749,14 @@ class _OfferCard extends StatelessWidget {
                   style: AppTheme.titleMd.copyWith(fontSize: 13),
                 ),
               ),
-              Text(
-                AppFormatters.money(trip.earnings),
-                style: AppTheme.titleMd.copyWith(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
+              if (!AppConfig.useLiveApi)
+                Text(
+                  AppFormatters.money(trip.earnings),
+                  style: AppTheme.titleMd.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -621,12 +772,21 @@ class _OfferCard extends StatelessWidget {
             text: trip.destination,
           ),
           const SizedBox(height: 10),
+          if (AppConfig.useLiveApi)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onDetail,
+                child: Text('Reserva #${trip.id} · Ver detalle'),
+              ),
+            ),
           Row(
             children: [
-              Text(
-                '${trip.distanceKm.toStringAsFixed(1)} km · ${trip.durationMinutes} min',
-                style: AppTheme.bodySm.copyWith(fontSize: 9.5),
-              ),
+              if (!AppConfig.useLiveApi)
+                Text(
+                  '${trip.distanceKm.toStringAsFixed(1)} km · ${trip.durationMinutes} min',
+                  style: AppTheme.bodySm.copyWith(fontSize: 9.5),
+                ),
               const Spacer(),
               TextButton(
                 onPressed: isProcessing ? null : onDecline,
@@ -636,7 +796,7 @@ class _OfferCard extends StatelessWidget {
               SizedBox(
                 height: 36,
                 child: FilledButton(
-                  onPressed: isProcessing ? null : onAccept,
+                  onPressed: isProcessing || !canAccept ? null : onAccept,
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -753,7 +913,8 @@ class _DriverDocuments extends StatelessWidget {
           style: AppTheme.bodySm.copyWith(fontSize: 9.5),
         ),
         const Spacer(),
-        Text('Soporte 24/7', style: AppTheme.bodySm.copyWith(fontSize: 9.5)),
+        if (!AppConfig.useLiveApi)
+          Text('Soporte 24/7', style: AppTheme.bodySm.copyWith(fontSize: 9.5)),
       ],
     );
   }

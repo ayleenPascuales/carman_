@@ -1,71 +1,52 @@
 # CARMAN
 
-Plataforma web y móvil para el alquiler de vehículos entre particulares, con llave digital, verificación de conductores y reservas protegidas.
+Proyecto de aula de alquiler de vehículos entre particulares. Aplicación Flutter (web y cliente móvil), API NestJS, TiDB Cloud, Firebase Authentication, textbee para SMS, Wompi **Sandbox** para pagos y Mapbox Directions opcional para rutas. **La presencia de una pantalla demo no acredita una funcionalidad operativa en la web publicada.**
 
-## Descripción
+## Documentos para entrega
 
-Carman conecta a clientes, conductores y propietarios de vehículos. Permite explorar el catálogo, consultar disponibilidad, reservar, pagar, abrir el coche desde el móvil y gestionar viajes. El frontend está construido con Flutter (Android, iOS y web) sobre el design system de Carman.
+| Documento | Archivo |
+| --- | --- |
+| Guía institucional de referencia (no modificar) | `Guia Proyecto Aulas Semestres 2 al 5 Unicolombo Ver 1.0 .docx` |
+| Informe de aula | `Informe Proyecto de Aula - CARMAN.docx` |
+| Manual de usuario | `Manual De Usuario - CARMAN.docx` |
+| Manual técnico | `Manual Tecnico - CARMAN.docx` |
+| Fuentes editables, figuras DEMO, SQL documental y lista de pendientes | [`docs/entrega/README_entrega.md`](docs/entrega/README_entrega.md) |
 
-## Tecnologías principales
+**No incluir** en la entrega cuentas de prueba, filas exportadas de TiDB, contraseñas, ubicaciones reales ni imágenes de consolas de proveedores. El anexo SQL reconstruye estructura documental, **no** es una migración para la base existente.
 
-- **Frontend:** Flutter 3.50+, Dart 3.14+, Riverpod y GoRouter.
-- **Backend:** Node.js y NestJS.
-- **Base de datos:** MySQL.
-- **Autenticación y servicios complementarios:** Firebase.
-- **Inteligencia artificial:** integración planificada.
+## Estado y límites (corte noviembre de 2026)
 
-## Estructura del proyecto
+- Web y API en un proyecto Vercel: <https://carmanapp.vercel.app>. El último registro de comprobaciones públicas documentó 200 en web, salud, catálogo y puntos, y 401 sin sesión en rutas privadas.
+- `GET /api/health/tablas` encontró 20 tablas **en metadatos**; no acredita SELECT/INSERT/UPDATE ni la tabla optativa de ubicación.
+- Hay rutas implementadas de catálogo, puntos, registro, perfil, reservas, notificaciones, revisión administrativa, órdenes y checkout Wompi **Sandbox**, y rutas viales condicionales a Mapbox. La web live crea reservas **sin realizar pagos**; no hay apertura móvil real ni correo transaccional.
+- El registro puede crear cuenta, pero la verificación de correo Firebase falló en producción con 503; no se ha comprobado un alta completa. No crear cuentas repetidamente para revisar documentación.
+- La ubicación precisa de viajes solo está prevista para cliente y conductor adultos con consentimiento explícito durante `EnCurso`; requiere aprobación de la tabla `003_ubicacion_compartida.sql` y activación de servidor. **No consta aplicada ni habilitada en producción**. El propietario no ve la ubicación precisa.
+- Código local con cambios no confirmados: no asumir que todo lo leído en el árbol local está en el último deploy. Los últimos resultados de tests registrados antes de esta entrega fueron 100 backend y 105 Flutter, con análisis Flutter sin incidencias; no son pruebas E2E de producción.
 
-- `backend/`: API y lógica del servidor (NestJS).
-- `frontend/`: aplicación Flutter para web y móvil. **Incluye 29 pantallas funcionales, paneles de cliente, propietario, conductor y administración, diseño responsive para móvil/tablet/web y datos demo.**
-- `docs/`: documentación técnica.
-- `infrastructure/`: configuraciones de infraestructura y despliegue.
+## Estructura
 
-## Frontend
+- `backend/src/`: módulos NestJS; `backend/migrations/`: scripts históricos y opción GPS.
+- `frontend/lib/`: interfaz Flutter, repositorios demo/API y pantallas.
+- `docs/entrega/`: fuentes Markdown, DOCX generados, imágenes rotuladas y anexo SQL.
+- `vercel.json`: composición `web` + `api` y Schedule.
+
+## Ejecución local (sin tocar producción)
+
+```bash
+cd backend
+npm ci
+cp .env.example .env
+# Configurar .env en local; NO ejecutar db:migrate contra carmandb.
+npm run start:dev
+```
 
 ```bash
 cd frontend
 flutter pub get
-flutter run -d chrome
+flutter run -d chrome  # modo demo predeterminado
+# Para conectar una API local configurada:
+flutter run -d chrome --dart-define=CARMAN_USE_LIVE_API=true \
+  --dart-define=CARMAN_API_URL=http://localhost:3000
 ```
 
-La aplicación arranca en modo demo, sin backend. Credenciales de prueba:
-
-- Correo: `alex.rivera@carman.es`
-- Contraseña: `Carman123`
-- Código SMS: `582301`
-
-Consulta la [documentación del frontend](frontend/readme.md) para arquitectura, flujo de pantallas, tests y guía de integración. El contrato JSON para backend está en [frontend/docs/api_contract.md](frontend/docs/api_contract.md).
-
-### Vista previa
-
-![Home de Carman](frontend/docs/screenshots/home.png)
-
-## Backend
-
-El backend ya implementa autenticación con Firebase, registro por roles, perfil y gestión de vehículos. Los módulos de reservas, pagos, notificaciones, rutas y calificaciones exponen controladores vacíos que deben completarse antes de conectar el frontend en modo API.
-
-```bash
-cd backend
-npm install
-npm run start:dev
-```
-
-`CARMAN_USE_LIVE_API=true` y `CARMAN_API_URL=http://localhost:3000` activan el consumo de la API real desde Flutter.
-
-## Despliegue web + API en un proyecto Vercel
-
-El [`vercel.json`](vercel.json) de la raíz usa [Vercel Services (beta)](https://vercel.com/docs/services): Flutter Web se compila como sitio estático y NestJS como función. Ambos comparten **un proyecto y un dominio**. En Vercel, `/` (incluidos enlaces directos como `/admin`) sirve Flutter, mientras `/api/health`, `/api/auth/...` y las demás rutas `/api/...` llegan a NestJS. Vercel Services conserva el prefijo `/api`; `backend/src/configure-app.ts` lo aplica solo en Vercel, sin cambiar las rutas de los controladores ni la API local.
-
-1. Antes de desplegar, rotar las credenciales TiDB y Firebase Admin que se compartieron anteriormente. El export local `descarga_tidb/` está excluido de Git y Vercel: contiene archivos de datos y no debe compartirse. La exportación actual ya incluye la tabla OTP y `ciudad` en puntos; la [auditoría de los 20 esquemas](docs/auditoria_esquema_tidb.md) identifica lo implementado y lo pendiente. Confirmar también el esquema en vivo; **no ejecutar `db:migrate` sobre esa base existente**.
-2. Reutilizar el proyecto Vercel existente **`carman_app`**, con **Root Directory = raíz del repositorio** (no `backend` ni `frontend`); desde esta raíz se puede vincular con `vercel link --yes --scope proyecto-carman --project carman_app`. La CLI puede desplegar cambios locales sin `git push`. No sobrescribir los comandos de compilación ni las carpetas de salida definidas por servicio en `vercel.json`: en la API, `entrypoint` y `outputDirectory` mantienen las dependencias dentro de la función. El build web instala un Flutter 3.50.1 fijado y verificado, y activa `CARMAN_USE_LIVE_API=true`; puede tardar varios minutos. `.vercelignore` excluye los archivos `.env` locales antes de subir el código.
-3. En **Settings → Environment Variables**, configurar solo para el servidor `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_CA`, `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` (o `FIREBASE_SERVICE_ACCOUNT_JSON`), `TEXTBEE_API_KEY`, `SMS_OTP_SECRET`, `CRON_SECRET` y `CORS_ORIGINS=https://<dominio-del-proyecto>`. NestJS 12 necesita `NODE_OPTIONS=--experimental-require-module` en las funciones de Vercel. Revisar `backend/.env.example` y habilitar Production/Preview según corresponda. Guardar las claves en Vercel, **no en Git ni en `dart-define`**.
-4. Verificar `/`, `/admin`, un archivo real como `/main.dart.js`, `/api/health` y que `/api/internal/inactive-accounts` sin `CRON_SECRET` devuelva 403. Después, iniciar sesión con la cuenta de prueba existente (no registrarla de nuevo) y probar Firebase/textbee con sus proveedores configurados. `/api/health` solo comprueba conexión a TiDB: no confirma tablas, correo ni SMS.
-
-Si Vercel solo muestra `[BUILD_UTILS_SPAWN_128]`, revisar las líneas anteriores del log: `frontend/scripts/build-web.sh` indica la etapa que falló. No compartir contraseñas ni claves al pedir ayuda con el log.
-
-Flutter Web usa automáticamente el dominio actual más `/api`, tanto en producción como en previews. Android/iOS se compilan y distribuyen **por separado**: para conectarlos a este proyecto, usar `--dart-define=CARMAN_USE_LIVE_API=true --dart-define=CARMAN_API_URL=https://<dominio-del-proyecto>/api`. Vercel no ejecuta las apps nativas. Varias rutas de reservas, pagos y otros módulos **aún no están implementadas** en el backend; desplegar la web en modo API no hace funcionales esos flujos. Detalles de configuración y límites: [`backend/readme.md`](backend/readme.md).
-
-## Estado
-
-Frontend completo y navegable en modo demo. Backend en desarrollo: reservas, pagos y notificaciones pendientes. La integración en vivo está preparada a nivel de repositorios.
+El build web en `frontend/scripts/build-web.sh` activa el modo API en Vercel; Android/iOS se compilan y distribuyen por separado. La URL API puede ser pública; **ningún secreto** debe ir en `dart-define` o en el navegador. Consultar el [manual técnico](docs/entrega/Manual_Tecnico_CARMAN.md) y los archivos `.env.example` antes de configurar servicios.

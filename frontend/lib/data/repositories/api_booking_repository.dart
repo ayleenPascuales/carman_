@@ -37,31 +37,75 @@ class ApiBookingRepository implements BookingRepository {
         .toList();
   }
 
+  Future<Reservation> fetchReservation(String id) async {
+    final payload = await _api.get(ApiEndpoints.reservation(id), token: _token());
+    return ApiMappers.reservation(payload);
+  }
+
+  Future<Reservation> decideWithoutDriver(String id, String decision) async {
+    await _api.patch('/reservas/$id/decision-sin-conductor',
+        token: _token(), body: {'decision': decision});
+    return fetchReservation(id);
+  }
+
+  Future<Reservation> transition(String id, {required bool finish}) async {
+    await _api.patch(finish ? ApiEndpoints.finishReservation(id)
+        : ApiEndpoints.startReservation(id), token: _token());
+    return fetchReservation(id);
+  }
+
   @override
   Future<Reservation> createReservation({
     required BookingDraft draft,
     required PaymentMethod paymentMethod,
+    bool requestDriver = false,
   }) async {
     final payload = await _api.post(
-      ApiEndpoints.reservations,
+      ApiEndpoints.vehicleReservation(draft.vehicle.id),
       token: _token(),
       body: {
-        'idVehiculo': int.tryParse(draft.vehicle.id) ?? draft.vehicle.id,
-        'fechaInicio': draft.startAt.toIso8601String(),
-        'fechaFin': draft.endAt.toIso8601String(),
-        'modalidad': draft.mode.name,
-        'idPuntoRecogida': draft.pickupPoint.id,
-        'idPuntoEntrega': draft.pickupPoint.id,
-        'seguro': draft.insurance.id,
-        'metodoPagoId': paymentMethod.id,
-        'metodoPago': paymentMethod.displayLabel,
+        'fechaInicioServicio': _date(draft.startAt),
+        'horaInicioServicio': _hour(draft.startAt),
+        'fechaFinServicio': _date(draft.endAt),
+        'horaFinServicio': _hour(draft.endAt),
+        'solicitarConductor': requestDriver,
       },
     );
+    final id = payload['idReserva'];
+    if (id != null) {
+      try {
+        final reservations = await fetchReservations();
+        for (final reservation in reservations) {
+          if (reservation.id == '$id') return reservation;
+        }
+      } on AppException {
+        // La operación ya se confirmó; devolver el contrato mínimo sin
+        // repetir el POST ni dar a entender que se ha cobrado.
+      }
+    }
     return ApiMappers.reservation(
       payload,
       fallbackVehicle: draft.vehicle,
       fallbackDraft: draft,
     );
+  }
+
+  String _date(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  String _hour(DateTime value) {
+    const allowed = [8, 9, 10, 11, 14, 15, 16, 17, 18];
+    if (value.minute != 0 || !allowed.contains(value.hour)) {
+      throw const AppException(
+        'Selecciona un horario permitido: 8–11 a. m. o 2–6 p. m.',
+        code: 'invalid_time',
+      );
+    }
+    final display = value.hour > 12 ? value.hour - 12 : value.hour;
+    return '${value.hour < 12 ? display.toString().padLeft(2, '0') : display}:00 '
+        '${value.hour >= 12 ? 'PM' : 'AM'}';
   }
 
   @override
@@ -85,29 +129,21 @@ class ApiBookingRepository implements BookingRepository {
   }
 
   @override
-  Future<Reservation> submitReview({
+  Future<void> submitReview({
     required String id,
     required int rating,
     required String comment,
   }) async {
-    final payload = await _api.post(
+    await _api.post(
       ApiEndpoints.reviewReservation(id),
       token: _token(),
-      body: {'puntuacion': rating, 'comentario': comment},
+      body: {
+        'tipoObjetivo': 'Vehiculo',
+        'puntuacion': rating,
+        'comentario': comment.trim(),
+      },
     );
-    final raw = payload['reserva'] ?? payload['data'];
-    if (raw is Map<String, dynamic>) {
-      return ApiMappers.reservation(raw);
-    }
-    final reservations = await fetchReservations();
-    for (final reservation in reservations) {
-      if (reservation.id == id) {
-        return reservation.copyWith(hasReview: true);
-      }
-    }
-    throw const AppException(
-      'La reseña se envió, pero no se pudo actualizar la reserva.',
-      code: 'invalid_review',
-    );
+    // El POST ya confirmó la escritura; no disparar un segundo GET cuya
+    // caída haría pensar que el envío falló y animaría a repetirlo.
   }
 }

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../features/admin/presentation/screens/admin_dashboard_screen.dart';
+import '../../features/admin/presentation/screens/admin_detail_screen.dart';
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -13,8 +14,10 @@ import '../../features/auth/presentation/screens/welcome_screen.dart';
 import '../../features/booking/presentation/screens/booking_success_screen.dart';
 import '../../features/booking/presentation/screens/checkout_screen.dart';
 import '../../features/booking/presentation/screens/payment_failed_screen.dart';
+import '../../features/booking/presentation/screens/payment_history_screen.dart';
 import '../../features/booking/presentation/screens/payment_methods_screen.dart';
 import '../../features/booking/presentation/screens/reservation_expired_screen.dart';
+import '../../features/booking/presentation/screens/trip_payment_screen.dart';
 import '../../features/driver/presentation/screens/driver_dashboard_screen.dart';
 import '../../features/explore/presentation/screens/home_screen.dart';
 import '../../features/explore/presentation/screens/results_screen.dart';
@@ -24,6 +27,7 @@ import '../../features/license/presentation/screens/license_review_screen.dart';
 import '../../features/license/presentation/screens/license_verification_screen.dart';
 import '../../features/owner/presentation/screens/add_vehicle_screen.dart';
 import '../../features/owner/presentation/screens/owner_dashboard_screen.dart';
+import '../../features/owner/presentation/screens/owner_vehicle_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
 import '../../features/profile/presentation/screens/notifications_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
@@ -74,6 +78,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         return auth.pendingVerification
             ? AppRoutes.verifyOtp
             : AppRoutes.welcome;
+      }
+      // Impedir que una ruta directa monte el controlador privado de otro rol.
+      // El backend sigue siendo la autoridad para autorizar cada petición.
+      if (auth.isAuthenticated &&
+          (path == AppRoutes.admin || path.startsWith('/admin/')) &&
+          auth.user?.isAdmin != true) {
+        return AppRoutes.profile;
+      }
+      if (auth.isAuthenticated && path == AppRoutes.driver &&
+          auth.user?.isDriver != true) {
+        return AppRoutes.profile;
+      }
+      if (auth.isAuthenticated &&
+          (path == AppRoutes.owner || path.startsWith('/owner/vehicles/')) &&
+          auth.user?.isOwner != true) {
+        return AppRoutes.profile;
       }
       if (auth.isAuthenticated && isAuthFlow) {
         return AppRoutes.home;
@@ -194,6 +214,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.paymentHistory,
+        builder: (context, state) => const ResponsiveRouteFrame(
+          maxWidth: 820,
+          child: PaymentHistoryScreen(),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.bookingSuccess,
         builder: (context, state) => const ResponsiveRouteFrame(
           maxWidth: 680,
@@ -250,6 +277,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/trip/:id/payment',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: TripPaymentScreen(reservationId: state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.driver,
         builder: (context, state) => const ResponsiveRouteFrame(
           maxWidth: 900,
@@ -264,6 +298,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/admin/users/:id',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: AdminDetailScreen(id: state.pathParameters['id']!,
+              isRevision: false),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/revisions/:id',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: AdminDetailScreen(id: state.pathParameters['id']!,
+              isRevision: true),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.owner,
         builder: (context, state) => const ResponsiveRouteFrame(
           maxWidth: 1240,
@@ -275,6 +325,29 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ResponsiveRouteFrame(
           maxWidth: 760,
           child: AddVehicleScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/owner/vehicles/:id',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: OwnerVehicleScreen(vehicleId: state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/owner/vehicles/:id/edit',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: OwnerVehicleScreen(vehicleId: state.pathParameters['id']!,
+              page: OwnerVehiclePage.edit),
+        ),
+      ),
+      GoRoute(
+        path: '/owner/vehicles/:id/revision',
+        builder: (context, state) => ResponsiveRouteFrame(
+          maxWidth: 760,
+          child: OwnerVehicleScreen(vehicleId: state.pathParameters['id']!,
+              page: OwnerVehiclePage.review),
         ),
       ),
     ],

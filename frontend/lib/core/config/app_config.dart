@@ -40,7 +40,7 @@ abstract final class AppConfig {
   static const retryHoldMinutes = 10;
 
   /// Currency used across the demo (the product is dollar-denominated).
-  static const currencyLocale = 'en_US';
+  static const currencyLocale = useLiveApi ? 'es_CO' : 'en_US';
   static const currencySymbol = '\$';
   static const taxRate = 0.21;
 

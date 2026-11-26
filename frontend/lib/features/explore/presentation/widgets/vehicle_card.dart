@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/app_formatters.dart';
@@ -130,12 +131,14 @@ class VehicleCard extends ConsumerWidget {
                           ),
                         ),
                       ),
+                      if (!AppConfig.useLiveApi || vehicle.reviewCount > 0)
                       Positioned(
                         left: 10,
                         bottom: 10,
                         child: RatingBadge(
                           rating: vehicle.rating,
-                          count: vehicle.tripCount,
+                          count: AppConfig.useLiveApi
+                              ? vehicle.reviewCount : vehicle.tripCount,
                           compact: true,
                         ),
                       ),

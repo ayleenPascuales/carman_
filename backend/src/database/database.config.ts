@@ -3,6 +3,11 @@ import { resolve } from 'node:path';
 import type { PoolOptions } from 'mysql2';
 
 export function databaseOptions(env: Record<string, string | undefined>): PoolOptions {
+  const localTestDatabase = ['127.0.0.1', 'localhost', '::1'].includes(env.DB_HOST ?? '')
+    && /^carman_(?:ensayo|test)(?:_|$)/.test(env.DB_NAME ?? '');
+  if (env.DB_SSL_MODE === 'DISABLED' && !localTestDatabase) {
+    throw new Error('Solo puede deshabilitarse TLS para una base Carman de ensayo local.');
+  }
   const ca = env.DB_SSL_CA
     ? env.DB_SSL_CA.replace(/\\n/g, '\n')
     : env.DB_SSL_CA_PATH
@@ -15,7 +20,7 @@ export function databaseOptions(env: Record<string, string | undefined>): PoolOp
     password: env.DB_PASSWORD,
     database: env.DB_NAME,
     timezone: '-05:00',
-    ssl: {
+    ssl: env.DB_SSL_MODE === 'DISABLED' ? undefined : {
       rejectUnauthorized: true,
       minVersion: 'TLSv1.2',
       ...(ca ? { ca } : {}),

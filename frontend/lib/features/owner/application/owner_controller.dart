@@ -1,10 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../data/models/owner_models.dart';
 import '../../../data/models/vehicle.dart';
+import '../../../data/repositories/owner_repository.dart';
 import '../../../data/repositories/vehicle_repository.dart';
 import '../../../providers.dart';
+import '../../auth/application/auth_controller.dart';
 import '../../explore/application/catalog_controller.dart';
 
 class OwnerState {
@@ -56,25 +59,29 @@ class OwnerController extends Notifier<OwnerState> {
 
   @override
   OwnerState build() {
+    final id = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
+    if (id == null) return const OwnerState(stats: _emptyStats, isLoading: false);
     Future.microtask(load);
     return const OwnerState(stats: _emptyStats);
   }
 
   Future<void> load() async {
+    final accountId = ref.read(authControllerProvider).user?.id;
+    if (accountId == null) return;
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final data = await ref.read(ownerRepositoryProvider).fetchDashboard();
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(
         stats: data.stats,
         listings: data.listings,
         isLoading: false,
       );
     } on AppException catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(isLoading: false, error: error.message);
     } catch (_) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || ref.read(authControllerProvider).user?.id != accountId) return;
       state = state.copyWith(
         isLoading: false,
         error: 'No pudimos cargar el panel.',
@@ -88,6 +95,18 @@ class OwnerController extends Notifier<OwnerState> {
       final vehicle = await ref
           .read(vehicleRepositoryProvider)
           .publishVehicle(draft);
+      if (AppConfig.useLiveApi) {
+        state = state.copyWith(lastPublished: vehicle, isPublishing: false);
+        await load();
+        ref.invalidate(catalogControllerProvider);
+        if (state.error != null) {
+          state = state.copyWith(error:
+              'El vehículo se registró, pero no se pudo consultar el inventario. '
+              'Recarga antes de reintentar.');
+          return false;
+        }
+        return true;
+      }
       final meta = OwnerVehicle(
         id: 'ov-${DateTime.now().millisecondsSinceEpoch}',
         vehicleId: vehicle.id,
@@ -126,6 +145,32 @@ class OwnerController extends Notifier<OwnerState> {
       );
       return false;
     }
+  }
+
+  Future<bool> changeStatus(String vehicleId, OwnerVehicleStatus status) async {
+    if (AppConfig.useLiveApi) {
+      if (status != OwnerVehicleStatus.available &&
+          status != OwnerVehicleStatus.inactive) {
+        return false;
+      }
+      state = state.copyWith(clearError: true);
+      try {
+        await (ref.read(ownerRepositoryProvider) as ApiOwnerRepository)
+            .changeVehicleState(vehicleId, status == OwnerVehicleStatus.available);
+        await load();
+        ref.invalidate(catalogControllerProvider);
+        return state.error == null;
+      } on AppException catch (error) {
+        state = state.copyWith(error: error.message);
+        return false;
+      } catch (_) {
+        state = state.copyWith(error:
+            'No se pudo confirmar el estado. Actualiza el inventario antes de reintentar.');
+        return false;
+      }
+    }
+    setStatus(vehicleId, status);
+    return true;
   }
 
   void setStatus(String vehicleId, OwnerVehicleStatus status) {

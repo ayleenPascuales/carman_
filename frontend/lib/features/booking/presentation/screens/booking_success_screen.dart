@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -69,13 +70,17 @@ class BookingSuccessScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 20),
               Text(
-                '¡Reserva confirmada!',
+                AppConfig.useLiveApi
+                    ? 'Reserva registrada' : '¡Reserva confirmada!',
                 textAlign: TextAlign.center,
                 style: AppTheme.headlineLg.copyWith(fontSize: 27),
               ),
               const SizedBox(height: 6),
               Text(
-                'Tu llave digital estará lista antes de la entrega.',
+                AppConfig.useLiveApi
+                     ? 'Consulta el estado y la orden en Mis viajes. '
+                       'Aún no se ha realizado ningún pago.'
+                    : 'Tu llave digital estará lista antes de la entrega.',
                 textAlign: TextAlign.center,
                 style: AppTheme.bodyMd.copyWith(
                   color: AppColors.tertiaryText,
@@ -122,10 +127,10 @@ class BookingSuccessScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                        const StatusBadge(
-                          label: 'Confirmada',
-                          color: AppColors.success,
-                          icon: Icons.check_circle_rounded,
+                        StatusBadge(
+                          label: reservation.status.label,
+                          color: reservation.status.color,
+                          icon: reservation.status.icon,
                         ),
                       ],
                     ),
@@ -146,14 +151,15 @@ class BookingSuccessScreen extends ConsumerWidget {
                     const SizedBox(height: 9),
                     _Row(
                       icon: Icons.payments_outlined,
-                      label: 'Total pagado',
+                      label: AppConfig.useLiveApi
+                          ? 'Precio estimado (COP)' : 'Total pagado',
                       value: AppFormatters.money(
                         reservation.pricing.total,
                         precise: true,
                       ),
                     ),
                     const SizedBox(height: 9),
-                    _Row(
+                    if (!AppConfig.useLiveApi) _Row(
                       icon: Icons.credit_card_rounded,
                       label: 'Método',
                       value: reservation.paymentMethodLabel,
@@ -162,7 +168,7 @@ class BookingSuccessScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              Container(
+              if (!AppConfig.useLiveApi) Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceSoft,
@@ -219,6 +225,7 @@ class BookingSuccessScreen extends ConsumerWidget {
                 variant: CarmanButtonVariant.outline,
                 onPressed: () => context.go('/home'),
               ),
+              if (!AppConfig.useLiveApi) ...[
               const SizedBox(height: 8),
               Center(
                 child: TextButton(
@@ -230,6 +237,7 @@ class BookingSuccessScreen extends ConsumerWidget {
                   child: const Text('Enviar factura por correo'),
                 ),
               ),
+              ],
             ],
           ),
         ),

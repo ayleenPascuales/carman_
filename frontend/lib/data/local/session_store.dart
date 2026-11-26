@@ -9,6 +9,7 @@ class SessionStore {
   SessionStore(this._prefs);
 
   final SharedPreferences _prefs;
+  String? _volatileToken;
 
   static const _kSession = 'carman.session.user';
   static const _kToken = 'carman.session.token';
@@ -33,10 +34,13 @@ class SessionStore {
     await _prefs.setString(_kSession, jsonEncode(user.toJson()));
   }
 
-  String? loadToken() => _prefs.getString(_kToken);
+  String? loadToken() => _volatileToken ?? _prefs.getString(_kToken);
 
-  Future<void> saveToken(String? token) async {
+  Future<void> saveToken(String? token, {bool persistent = true}) async {
+    _volatileToken = token;
     if (token == null || token.isEmpty) {
+      await _prefs.remove(_kToken);
+    } else if (!persistent) {
       await _prefs.remove(_kToken);
     } else {
       await _prefs.setString(_kToken, token);
@@ -50,15 +54,19 @@ class SessionStore {
   }
 
   Future<void> clearSession() async {
+    _volatileToken = null;
     await _prefs.remove(_kSession);
     await _prefs.remove(_kToken);
   }
 
-  Set<String> loadFavorites() =>
-      (_prefs.getStringList(_kFavorites) ?? const <String>[]).toSet();
+  Set<String> loadFavorites({String? accountId}) =>
+      (_prefs.getStringList(accountId == null ? _kFavorites : '$_kFavorites.$accountId') ??
+          const <String>[]).toSet();
 
-  Future<void> saveFavorites(Set<String> ids) async {
-    await _prefs.setStringList(_kFavorites, ids.toList());
+  Future<void> saveFavorites(Set<String> ids, {String? accountId}) async {
+    await _prefs.setStringList(
+      accountId == null ? _kFavorites : '$_kFavorites.$accountId', ids.toList(),
+    );
   }
 
   bool get hasOnboarded => _prefs.getBool(_kOnboarded) ?? false;
@@ -73,11 +81,15 @@ class SessionStore {
     await _prefs.setString(_kCity, city);
   }
 
-  Set<String> loadReadNotifications() =>
-      (_prefs.getStringList(_kNotifications) ?? const <String>[]).toSet();
+  Set<String> loadReadNotifications({String? accountId}) =>
+      (_prefs.getStringList(accountId == null ? _kNotifications : '$_kNotifications.$accountId') ??
+          const <String>[]).toSet();
 
-  Future<void> saveReadNotifications(Set<String> ids) async {
-    await _prefs.setStringList(_kNotifications, ids.toList());
+  Future<void> saveReadNotifications(Set<String> ids, {String? accountId}) async {
+    await _prefs.setStringList(
+      accountId == null ? _kNotifications : '$_kNotifications.$accountId',
+      ids.toList(),
+    );
   }
 
   /// Demo accounts let a registered user log in again after signing out.

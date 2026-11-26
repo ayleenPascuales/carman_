@@ -146,11 +146,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         }
                       },
                     ),
-                    _MenuItem(
-                      icon: Icons.credit_card_outlined,
-                      title: 'Métodos de pago',
-                      onTap: () => context.push('/payment-methods'),
-                    ),
+                    if (AppConfig.useLiveApi && user.roles.contains(UserRole.client))
+                      _MenuItem(
+                        icon: Icons.receipt_long_outlined,
+                        title: 'Historial de pagos',
+                        onTap: () => context.push('/payment-history'),
+                      )
+                    else if (!AppConfig.useLiveApi)
+                      _MenuItem(
+                        icon: Icons.credit_card_outlined,
+                        title: 'Métodos de pago (demo)',
+                        onTap: () => context.push('/payment-methods'),
+                      ),
                     _MenuItem(
                       icon: Icons.notifications_none_rounded,
                       title: 'Notificaciones',
@@ -320,6 +327,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     WidgetRef ref,
     UserProfile user,
   ) async {
+    if (AppConfig.useLiveApi && !user.isOwner) {
+      unawaited(context.push('/owner/add-vehicle'));
+      return;
+    }
     if (user.isOwner) {
       unawaited(context.push('/owner'));
       return;
@@ -556,7 +567,10 @@ class _StatsBar extends StatelessWidget {
         children: [
           _Stat(value: '${user.tripCount}', label: 'Viajes'),
           const _StatDivider(),
-          _Stat(value: user.rating.toStringAsFixed(1), label: 'Valoración'),
+           _Stat(
+             value: AppConfig.useLiveApi ? '—' : user.rating.toStringAsFixed(1),
+             label: 'Valoración',
+           ),
           const _StatDivider(),
           _Stat(
             value: user.memberSince != null
