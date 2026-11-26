@@ -4,11 +4,11 @@ import { databaseOptions } from './database.config';
 
 @Injectable()
 class DatabaseLifecycle implements OnApplicationShutdown {
-    constructor(@Inject('DATABASE_CONNECTION') private readonly database: Pool) { }
+  constructor(@Inject('DATABASE_CONNECTION') private readonly database: Pool) {}
 
-    async onApplicationShutdown() {
-        await this.database.end();
-    }
+  async onApplicationShutdown() {
+    await this.database.end();
+  }
 }
 
 @Module({
